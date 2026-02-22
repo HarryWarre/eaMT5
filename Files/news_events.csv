@@ -1,0 +1,54 @@
+# News Events CSV Template
+# Copy this file to: MQL5/Files/news_events.csv
+# Update weekly from ForexFactory calendar
+#
+# Format: DateTime,Currency,Title,Impact
+# DateTime: YYYY.MM.DD HH:MM (GMT time)
+# Currency: USD, EUR, GBP, JPY, AUD, CAD, CHF, NZD
+# Impact: 1=Low, 2=Medium, 3=High
+#
+# Sources:
+# - ForexFactory: https://www.forexfactory.com/calendar
+# - Investing.com: https://www.investing.com/economic-calendar/
+#
+# ============================================================
+
+# WEEK 1 - November 2024
+2024.11.01 13:30,USD,Non-Farm Payrolls,3
+2024.11.01 13:30,USD,Unemployment Rate,2
+2024.11.01 15:00,USD,ISM Manufacturing PMI,2
+
+2024.11.04 12:45,EUR,German Factory Orders,2
+2024.11.04 15:00,USD,Services PMI,2
+
+2024.11.05 00:30,AUD,RBA Interest Rate Decision,3
+2024.11.05 07:00,GBP,Services PMI,2
+2024.11.05 13:15,USD,ADP Employment,2
+
+2024.11.06 12:45,EUR,ECB Interest Rate Decision,3
+2024.11.06 13:30,EUR,ECB Press Conference,3
+2024.11.06 13:30,USD,Unemployment Claims,2
+
+2024.11.07 13:30,USD,Retail Sales,3
+2024.11.07 18:00,USD,FOMC Statement,3
+2024.11.07 18:30,USD,FOMC Press Conference,3
+
+# WEEK 2 - November 2024
+2024.11.08 13:30,USD,PPI,2
+2024.11.11 13:30,USD,Core CPI,3
+
+2024.11.12 07:00,GBP,UK Employment Change,3
+2024.11.12 07:00,GBP,Average Earnings,2
+
+2024.11.13 08:30,EUR,German ZEW Economic Sentiment,2
+2024.11.13 13:30,USD,Core Retail Sales,2
+
+2024.11.14 12:00,GBP,BOE Interest Rate Decision,3
+2024.11.14 12:00,GBP,MPC Meeting Minutes,2
+2024.11.14 13:30,USD,Unemployment Claims,2
+
+2024.11.15 09:30,EUR,EU GDP,3
+2024.11.15 13:30,USD,Building Permits,1
+
+# TEMPLATE for custom events (uncomment and edit):
+# 2024.MM.DD HH:MM,CUR,Event Title,Impact

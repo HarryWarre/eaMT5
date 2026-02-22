@@ -19,20 +19,30 @@ enum ENUM_LOT_MODE
    LOT_MODE_FIXED    // Fixed Lot
   };
 
+enum ENUM_MARTINGALE_MODE
+  {
+   MARTINGALE_MODE_NORMAL, // Bình thường (Chờ Lãi Ròng)
+   MARTINGALE_MODE_SMART   // Smart (Đóng hòa vốn ngay khi về 0)
+  };
+
 input group "=== QUẢN LÝ VỐN (Money Management) ==="
 input ENUM_LOT_MODE InpLotMode = LOT_MODE_PERCENT; // Chế độ tính Lot
 input double InpBaseRisk       = 1.0;              // Rủi ro cơ bản (%) (Cho Risk%)
 input double InpFixedLot       = 0.01;             // Lot cố định (Cho Fixed Lot)
 input double InpMaxDrawdownPct = 50.0;             // Sụt giảm tối đa (%) - Chế độ phòng thủ
 
+
 input group "=== CHIẾN THUẬT PRICE ACTION (13 MODELS) ==="
 input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M15; // Khung thực thi
 input int    InpRSIPeriod      = 14;      // RSI Period
 
 input group "=== MARTINGALE TỬ CHIẾN ==="
+input ENUM_MARTINGALE_MODE InpMartMode = MARTINGALE_MODE_SMART; // Chế độ Smart hay Normal
 input double InpMartMultiplier = 2.0;     // Hệ số nhân Martingale
 input int    InpMartGridPips   = 300;     // Khoảng cách giữa các tầng (points)
-input int    InpMartClosePips  = 50;      // Lãi tối thiểu để đóng hedge (points, 0=hòa vốn)
+input int    InpMartClosePips  = 50;      // Lãi tối thiểu để đóng normal hedge (points)
+input int    InpSmartThresholdPips = 50;  // Ngưỡng an toàn sau khi đóng hòa vốn (points)
+
 
 input group "=== INTRADAY & TIN TỨC ==="
 input int    InpStartHour      = 8;       // Giờ bắt đầu giao chiến
@@ -56,6 +66,10 @@ int            dailyLosses;       // Đếm số lần thua trong ngày
 datetime       lastBarTime;       // Kiểm soát chỉ trade 1 lần/nến
 int            martingaleLevel;   // Tầng Martingale hiện tại
 double         initialBalance;    // Vốn ban đầu
+
+// Global variables for Smart Hedge
+double         lastBreakEvenClosePrice = 0.0; // Giá đóng hòa vốn gần nhất
+
 
 //+------------------------------------------------------------------+
 //| INIT                                                             |
@@ -197,10 +211,24 @@ int CheckPASignalExtended()
    if(IsLadderTop(rates[0], rates[1], rates[2], rates[3], rates[4])) isSell = true;
    
    // Hợp lưu BUY: D1 Xanh + RSI > 50 + PA Buy
-   if(d1Dir == 1 && rsi > 50.0 && isBuy) return 1;
+   if(d1Dir == 1 && rsi > 50.0 && isBuy) {
+      if(lastBreakEvenClosePrice > 0) {
+         double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+         double dist = MathAbs(currentPrice - lastBreakEvenClosePrice) / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         if(dist < InpSmartThresholdPips) return 0; // Chưa qua vùng nguy hiểm
+      }
+      return 1;
+   }
    
    // Hợp lưu SELL: D1 Đỏ + RSI < 50 + PA Sell
-   if(d1Dir == -1 && rsi < 50.0 && isSell) return -1;
+   if(d1Dir == -1 && rsi < 50.0 && isSell) {
+      if(lastBreakEvenClosePrice > 0) {
+         double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+         double dist = MathAbs(currentPrice - lastBreakEvenClosePrice) / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+         if(dist < InpSmartThresholdPips) return 0; // Chưa qua vùng nguy hiểm
+      }
+      return -1;
+   }
    
    return 0;
   }
@@ -659,12 +687,23 @@ void ManageMartingale() {
          minProfit = InpMartClosePips * point * (tickVal / tickSize) * totalLots;
    }
    
+   if(InpMartMode == MARTINGALE_MODE_SMART && martingaleLevel > 0) {
+      if(totalProfit >= 0) {
+         lastBreakEvenClosePrice = currentPrice;
+         CloseAllOrders();
+         Print("Odin: Chuỗi Martingale HÒA VỐN (Smart Mode)! P/L=", totalProfit);
+         martingaleLevel = 0;
+         return;
+      }
+   }
+   
    if(totalProfit >= minProfit && martingaleLevel > 0) {
       CloseAllOrders();
       Print("Odin: Chuỗi Martingale THẮNG! P/L=", totalProfit, " (Min=", DoubleToString(minProfit,2), ")");
       martingaleLevel = 0;
       return;
    }
+
    
    double lastPrice = GetLastEntryPrice();
    double currentPrice = SymbolInfoDouble(_Symbol, SYMBOL_BID);

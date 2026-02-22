@@ -84,7 +84,7 @@ int OnInit()
    
    if(handleRSI == INVALID_HANDLE)
      {
-      Print("Odin: Lỗi khởi tạo RSI.");
+      Print("Chronos: Lỗi khởi tạo RSI.");
       return INIT_FAILED;
      }
    
@@ -93,7 +93,7 @@ int OnInit()
    martingaleLevel  = 0;
    initialBalance   = AccountInfoDouble(ACCOUNT_BALANCE);
    
-   Print("Odin: Hệ thống Price Action Mở Rộng sẵn sàng (13 Models).");
+   Print("Chronos: Hệ thống Price Action Mở Rộng sẵn sàng (13 Models).");
    return INIT_SUCCEEDED;
   }
 
@@ -103,7 +103,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    IndicatorRelease(handleRSI);
-   Print("Odin: Rời vòng tròn. Reason: ", reason);
+   Print("Chronos: Rời vòng tròn. Reason: ", reason);
   }
 
 //+------------------------------------------------------------------+
@@ -650,10 +650,10 @@ bool IsNewsStorm() {
 void ExecuteEntry(int direction) {
    double lot = CalculateLot(0);
    martingaleLevel = 0;
-   string comment = StringFormat("Odin PA L%d", martingaleLevel);
+   string comment = StringFormat("Chronos PA L%d", martingaleLevel);
    if(direction == 1) Trade.Buy(lot, _Symbol, 0, 0, 0, comment);
    else Trade.Sell(lot, _Symbol, 0, 0, 0, comment);
-   Print("Odin: Ra đòn PA (Ext)! Dir=", direction, " Lot=", lot);
+   Print("Chronos: Ra đòn PA (Ext)! Dir=", direction, " Lot=", lot);
 }
 
 double CalculateLot(int level) { 
@@ -714,7 +714,7 @@ void ManageMartingale() {
       if(totalProfit >= 0) {
          lastBreakEvenClosePrice = currentPrice;
          CloseAllOrders();
-         Print("Odin: Chuỗi Martingale HÒA VỐN (Smart Mode)! P/L=", totalProfit);
+         Print("Chronos: Chuỗi Martingale HÒA VỐN (Smart Mode)! P/L=", totalProfit);
          martingaleLevel = 0;
          return;
       }
@@ -722,7 +722,7 @@ void ManageMartingale() {
    
    if(totalProfit >= minProfit && martingaleLevel > 0) {
       CloseAllOrders();
-      Print("Odin: Chuỗi Martingale THẮNG! P/L=", totalProfit, " (Min=", DoubleToString(minProfit,2), ")");
+      Print("Chronos: Chuỗi Martingale THẮNG! P/L=", totalProfit, " (Min=", DoubleToString(minProfit,2), ")");
       martingaleLevel = 0;
       return;
    }
@@ -738,13 +738,13 @@ void ManageMartingale() {
       double lot = CalculateLot(martingaleLevel);
       
       bool res;
-      string comment = StringFormat("Odin PA L%d", martingaleLevel);
+      string comment = StringFormat("Chronos PA L%d", martingaleLevel);
       
       // Đánh cùng chiều với lệnh L0 (DCA)
       if(dir == 1) res = Trade.Buy(lot, _Symbol, 0, 0, 0, comment);
       else res = Trade.Sell(lot, _Symbol, 0, 0, 0, comment);
       
-      if(res) Print("Odin: Bồi đòn DCA! Tầng=", martingaleLevel, " Lot=", lot);
+      if(res) Print("Chronos: Bồi đòn DCA! Tầng=", martingaleLevel, " Lot=", lot);
    }
 }
 
@@ -809,14 +809,14 @@ void ManageIntradayExit() {
         {
          CloseAllOrders();
          martingaleLevel = 0;
-         Print("Odin: Force Close cuối ngày. P/L=", p);
+         Print("Chronos: Force Close cuối ngày. P/L=", p);
         }
       else
         {
          if(p > 0) { // Chỉ đóng khi LỜI
             CloseAllOrders();
             martingaleLevel = 0;
-            Print("Odin: Đóng cuối ngày (TP). P/L=", p);
+            Print("Chronos: Đóng cuối ngày (TP). P/L=", p);
          }
         }
    }
@@ -838,7 +838,7 @@ void ManageDrawdownProtection() {
       if(CountMyOrders() > 0) {
          CloseAllOrders();
          martingaleLevel = 0;
-         Print("Odin: EMERGENCY STOP! Drawdown Limit Reached (", DoubleToString(ddPct, 2), "%). Closing ALL.");
+         Print("Chronos: EMERGENCY STOP! Drawdown Limit Reached (", DoubleToString(ddPct, 2), "%). Closing ALL.");
       }
    }
 }
@@ -857,7 +857,7 @@ void OnTrade() {
              double profit = HistoryDealGetDouble(ticket, DEAL_PROFIT);
              if(profit < 0) {
                  dailyLosses++;
-                 Print("Odin: Thua lệnh. Daily Loss Counter = ", dailyLosses);
+                 Print("Chronos: Thua lệnh. Daily Loss Counter = ", dailyLosses);
              }
          }
       }

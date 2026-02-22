@@ -708,35 +708,25 @@ void ManageMartingale() {
       return;
    }
 
-   int lastDir = GetLastEntryDirection();
-   if(lastDir == 0) return;
+   if(dir == 0) return;
    
    double dist = MathAbs(currentPrice - lastPrice) / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
-   // Thay vì "isAgainst" soi với lệnh gốc, ta đánh ngược lại khi tổng rổ lệnh âm và khoảng cách đủ
-   if(totalProfit < 0 && dist >= InpMartGridPips) {
+   bool isAgainst = (dir == 1 && currentPrice < lastPrice) || (dir == -1 && currentPrice > lastPrice);
+   
+   if(isAgainst && dist >= InpMartGridPips) {
       martingaleLevel++;
       double lot = CalculateLot(martingaleLevel);
       
       bool res;
-      string comment = StringFormat("Odin Hedge L%d", martingaleLevel);
+      string comment = StringFormat("Odin PA L%d", martingaleLevel);
       
-      // Đánh ngược chiều với lệnh gần nhất
-      if(lastDir == 1) res = Trade.Sell(lot, _Symbol, 0, 0, 0, comment);
-      else res = Trade.Buy(lot, _Symbol, 0, 0, 0, comment);
+      // Đánh cùng chiều với lệnh L0 (DCA)
+      if(dir == 1) res = Trade.Buy(lot, _Symbol, 0, 0, 0, comment);
+      else res = Trade.Sell(lot, _Symbol, 0, 0, 0, comment);
       
-      if(res) Print("Odin: Hedge Đảo Chiều! Tầng=", martingaleLevel, " Lot=", lot, " Ngược với lệnh trước");
+      if(res) Print("Odin: Bồi đòn DCA! Tầng=", martingaleLevel, " Lot=", lot);
    }
-}
-
-int GetLastEntryDirection() {
-   datetime t=0; int d=0;
-   for(int i=PositionsTotal()-1; i>=0; i--)
-      if(PositionGetSymbol(i)==_Symbol && PositionGetInteger(POSITION_MAGIC)==InpMagic) {
-         datetime time = (datetime)PositionGetInteger(POSITION_TIME);
-         if(time > t) { t=time; d=(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY)?1:-1; }
-      }
-   return d;
 }
 
 int CountMyOrders() {

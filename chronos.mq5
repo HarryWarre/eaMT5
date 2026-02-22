@@ -22,7 +22,8 @@ enum ENUM_LOT_MODE
 enum ENUM_MARTINGALE_MODE
   {
    MARTINGALE_MODE_NORMAL, // Bình thường (Chờ Lãi Ròng)
-   MARTINGALE_MODE_SMART   // Smart (Đóng hòa vốn ngay khi về 0)
+   MARTINGALE_MODE_SMART,  // Smart (Đóng hòa vốn ngay khi về 0)
+   MARTINGALE_MODE_NONE    // Không Martingale (Chỉ đánh 1 lệnh, dùng SL/TP)
   };
 
 input group "=== QUẢN LÝ VỐN (Money Management) ==="
@@ -36,6 +37,8 @@ input group "=== CHIẾN THUẬT ICHIMOKU + PA ==="
 input ENUM_TIMEFRAMES InpTimeframe = PERIOD_M15; // Khung thực thi
 input int    InpScanBars       = 100;     // Quét X nến gần nhất tìm Đỉnh/Đáy
 input int    InpToleranceBars  = 1;       // Dung sai đếm nến (±1 nến)
+input int    InpTakeProfitPips = 100;     // Chốt lời lệnh đầu tiên (points)
+input int    InpStopLossPips   = 100;     // Cắt lỗ lệnh đầu tiên (points) - Khi không DCA
 input int    InpRSIPeriod      = 14;      // RSI Period
 
 input group "=== MARTINGALE DCA ==="
@@ -47,6 +50,7 @@ input int    InpSmartThresholdPips = 50;  // Ngưỡng an toàn sau khi đóng h
 
 
 input group "=== INTRADAY & TIN TỨC ==="
+input bool   InpEnableTimeManagement = true; // Bật tắt quản lý thời gian (Trade Intraday)
 input int    InpStartHour      = 8;       // Giờ bắt đầu giao chiến
 input int    InpEndHour        = 22;      // Giờ ngừng mở lệnh mới
 input int    InpCloseHour      = 23;      // Giờ đóng lệnh
@@ -71,6 +75,46 @@ double         initialBalance;    // Vốn ban đầu
 
 // Global variables for Smart Hedge
 double         lastBreakEvenClosePrice = 0.0; // Giá đóng hòa vốn gần nhất
+
+// Forward declarations for Sakata Bottom Models
+bool IsAkaSanpei(MqlRates &c1, MqlRates &c2, MqlRates &c3);
+bool IsSashikomisen(MqlRates &c1, MqlRates &c2);
+bool IsHanareGoteZoko(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5);
+bool IsHanareShichiteZoko(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5, MqlRates &c6, MqlRates &c7);
+bool IsKaiDakisen(MqlRates &c1, MqlRates &c2);
+bool IsSaigoDakisenBuy(MqlRates &c1, MqlRates &c2);
+bool IsInInHarami(MqlRates &c1, MqlRates &c2);
+bool IsKaiYoInHarami(MqlRates &c1, MqlRates &c2);
+
+// Forward declarations for Sakata Top Models
+bool IsSanbaGarasu(MqlRates &c1, MqlRates &c2, MqlRates &c3);
+bool IsSanteHanareYoseSen(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4);
+bool IsKabuse(MqlRates &c1, MqlRates &c2);
+bool IsSutegoSen(MqlRates &c1, MqlRates &c2, MqlRates &c3);
+bool IsJouiDakisen(MqlRates &c1, MqlRates &c2);
+bool IsSaigoDakisenSell(MqlRates &c1, MqlRates &c2);
+bool IsYoYoHarami(MqlRates &c1, MqlRates &c2);
+bool IsJouiYoInHarami(MqlRates &c1, MqlRates &c2);
+
+// Forward declarations for other Helpers
+int GetDailyDirection();
+double GetRSI();
+bool IsNewBar();
+void ResetDailyCounters();
+bool IsCoreStable();
+bool IsWithinTradingHours();
+bool IsNewsStorm();
+void ExecuteEntry(int direction);
+double CalculateLot(int level);
+void ManageMartingale();
+int CountMyOrders();
+double GetTotalFloatingProfit();
+double GetTotalLots();
+double GetLastEntryPrice();
+int GetMartingaleDirection();
+void CloseAllOrders();
+void ManageIntradayExit();
+void ManageDrawdownProtection();
 
 
 //+------------------------------------------------------------------+
@@ -143,7 +187,7 @@ void OnTick()
 //| SIGNAL: RSI + D1 + Ichimoku Time + 13 PA Models                 |
 //+------------------------------------------------------------------+
 bool IsIchimokuCycle(int bars) {
-   int ichiNumbers[] = {9, 17, 26, 33, 42, 65, 76, 129, 226};
+   int ichiNumbers[] = {9, 17, 26, 33, 42, 51, 65, 76, 83, 97, 101, 129, 172, 200, 257};
    for(int i = 0; i < ArraySize(ichiNumbers); i++) {
       if(MathAbs(bars - ichiNumbers[i]) <= InpToleranceBars) return true;
    }
@@ -168,66 +212,34 @@ int CheckIchimokuSignal()
    
    if(!isCycleFromHigh && !isCycleFromLow) return 0; // Chưa tới điểm rơi thời gian
    
-   // 4. Price Action Check (Cần 6 nến cho mẫu hình 5 nến + shift)
+   // 4. Price Action Check (Cần 7 nến cho mẫu hình Sakata)
    MqlRates rates[];
    ArraySetAsSeries(rates, true);
-   if(CopyRates(_Symbol, InpTimeframe, 1, 6, rates) < 6) return 0;
+   if(CopyRates(_Symbol, InpTimeframe, 1, 7, rates) < 7) return 0;
    
-   // Kiểm tra tất cả 13 mẫu hình
+   // Kiểm tra 16 mẫu hình Sakata
    bool isBuy = false;
    bool isSell = false;
    
-   // --- 1. Piercing Line / Dark Cloud Cover (2 nến) ---
-   if(IsPiercing(rates[0], rates[1])) isBuy = true;
-   if(IsDarkCloud(rates[0], rates[1])) isSell = true;
+   // --- KÍCH HOẠT BUY (8 Mẫu Tạo Đáy) ---
+   if(IsAkaSanpei(rates[0], rates[1], rates[2])) isBuy = true;
+   if(IsSashikomisen(rates[0], rates[1])) isBuy = true;
+   if(IsHanareGoteZoko(rates[0], rates[1], rates[2], rates[3], rates[4])) isBuy = true;
+   if(IsHanareShichiteZoko(rates[0], rates[1], rates[2], rates[3], rates[4], rates[5], rates[6])) isBuy = true;
+   if(IsKaiDakisen(rates[0], rates[1])) isBuy = true;
+   if(IsSaigoDakisenBuy(rates[0], rates[1])) isBuy = true;
+   if(IsInInHarami(rates[0], rates[1])) isBuy = true;
+   if(IsKaiYoInHarami(rates[0], rates[1])) isBuy = true;
    
-   // --- 2. Kicking (2 nến) ---
-   if(IsKickingBull(rates[0], rates[1])) isBuy = true;
-   if(IsKickingBear(rates[0], rates[1])) isSell = true;
-   
-   // --- 3. Abandoned Baby (3 nến) ---
-   if(IsAbandonedBabyBull(rates[0], rates[1], rates[2])) isBuy = true;
-   if(IsAbandonedBabyBear(rates[0], rates[1], rates[2])) isSell = true;
-   
-   // --- 4. Morning Doji Star / Evening Doji Star (3 nến) ---
-   if(IsMorningDojiStar(rates[0], rates[1], rates[2])) isBuy = true;
-   if(IsEveningDojiStar(rates[0], rates[1], rates[2])) isSell = true;
-   
-   // --- 5. Morning Star / Evening Star (3 nến) ---
-   if(IsMorningStar(rates[0], rates[1], rates[2])) isBuy = true;
-   if(IsEveningStar(rates[0], rates[1], rates[2])) isSell = true;
-   
-   // --- 6. Three Inside Up / Down (3 nến) ---
-   if(IsThreeInsideUp(rates[0], rates[1], rates[2])) isBuy = true;
-   if(IsThreeInsideDown(rates[0], rates[1], rates[2])) isSell = true;
-   
-   // --- 7. Three Outside Up / Down (3 nến) ---
-   if(IsThreeOutsideUp(rates[0], rates[1], rates[2])) isBuy = true;
-   if(IsThreeOutsideDown(rates[0], rates[1], rates[2])) isSell = true;
-   
-   // --- 8. Three White Soldiers / Three Black Crows (3 nến) ---
-   if(IsThreeSoldiers(rates[0], rates[1], rates[2])) isBuy = true;
-   if(IsThreeCrows(rates[0], rates[1], rates[2])) isSell = true;
-   
-   // --- 9. Engulfing (2 nến) ---
-   if(IsEngulfing(rates[0], rates[1], 1)) isBuy = true;
-   if(IsEngulfing(rates[0], rates[1], -1)) isSell = true;
-   
-   // --- 10. Breakaway (5 nến) ---
-   if(IsBreakawayBull(rates[0], rates[1], rates[2], rates[3], rates[4])) isBuy = true;
-   if(IsBreakawayBear(rates[0], rates[1], rates[2], rates[3], rates[4])) isSell = true;
-   
-   // --- 11. Mat Hold (5 nến) ---
-   if(IsMatHoldBull(rates[0], rates[1], rates[2], rates[3], rates[4])) isBuy = true;
-   if(IsMatHoldBear(rates[0], rates[1], rates[2], rates[3], rates[4])) isSell = true;
-   
-   // --- 12. Rising Three Methods / Falling Three Methods (5 nến) ---
-   if(IsRisingThreeMethods(rates[0], rates[1], rates[2], rates[3], rates[4])) isBuy = true;
-   if(IsFallingThreeMethods(rates[0], rates[1], rates[2], rates[3], rates[4])) isSell = true;
-   
-   // --- 13. Ladder Bottom / Ladder Top (5 nến) ---
-   if(IsLadderBottom(rates[0], rates[1], rates[2], rates[3], rates[4])) isBuy = true;
-   if(IsLadderTop(rates[0], rates[1], rates[2], rates[3], rates[4])) isSell = true;
+   // --- KÍCH HOẠT SELL (8 Mẫu Tạo Đỉnh) ---
+   if(IsSanbaGarasu(rates[0], rates[1], rates[2])) isSell = true;
+   if(IsSanteHanareYoseSen(rates[0], rates[1], rates[2], rates[3])) isSell = true;
+   if(IsKabuse(rates[0], rates[1])) isSell = true;
+   if(IsSutegoSen(rates[0], rates[1], rates[2])) isSell = true;
+   if(IsJouiDakisen(rates[0], rates[1])) isSell = true;
+   if(IsSaigoDakisenSell(rates[0], rates[1])) isSell = true;
+   if(IsYoYoHarami(rates[0], rates[1])) isSell = true;
+   if(IsJouiYoInHarami(rates[0], rates[1])) isSell = true;
    
    // Hợp lưu BUY: Thời gian từ Đỉnh + D1 Xanh + RSI > 50 + PA Buy
    if(isCycleFromHigh && d1Dir == 1 && rsi > 50.0 && isBuy) {
@@ -253,338 +265,107 @@ int CheckIchimokuSignal()
   }
 
 //+------------------------------------------------------------------+
-//| 1. Piercing Line / Dark Cloud Cover (2 nến)                      |
+//| SAKATA BOTTOM MODELS (BUY)                                       |
 //+------------------------------------------------------------------+
-bool IsPiercing(MqlRates &c, MqlRates &p) // Buy
-  {
-   return (p.close < p.open && // Nến trước đỏ
-           c.close > c.open && // Nến này xanh
-           c.open < p.low &&   // Mở cửa Gap down
-           c.close > (p.open + p.close)/2); // Đóng cửa trên 50% nến trước
-  }
+bool IsAkaSanpei(MqlRates &c1, MqlRates &c2, MqlRates &c3) { // 3 Chàng lính trắng
+   return (c3.close > c3.open && c2.close > c2.open && c1.close > c1.open &&
+           c1.close > c2.close && c2.close > c3.close &&
+           c1.high > c2.high && c2.high > c3.high);
+}
 
-bool IsDarkCloud(MqlRates &c, MqlRates &p) // Sell
-  {
-   return (p.close > p.open && // Nến trước xanh
-           c.close < c.open && // Nến này đỏ
-           c.open > p.high &&  // Mở cửa Gap up
-           c.close < (p.open + p.close)/2); // Đóng cửa dưới 50% nến trước
-  }
+bool IsSashikomisen(MqlRates &c1, MqlRates &c2) { // Hai đường đâm xuyên
+   return (c2.close < c2.open && 
+           c1.close > c1.open && 
+           c1.open < c2.low &&
+           c1.close > (c2.open + c2.close)/2 && c1.close < c2.open); 
+}
 
-//+------------------------------------------------------------------+
-//| 2. Kicking (2 nến) - Marubozu đảo chiều                          |
-//+------------------------------------------------------------------+
-bool IsKickingBull(MqlRates &c, MqlRates &p) // Buy
-  {
-   double pBody = MathAbs(p.close - p.open);
-   double pRange = p.high - p.low;
-   double cBody = MathAbs(c.close - c.open);
-   double cRange = c.high - c.low;
-   if(pRange == 0 || cRange == 0) return false;
-   
-   return (p.close < p.open &&          // Nến trước đỏ (Marubozu)
-           pBody > pRange * 0.8 &&       // Thân > 80% range (gần Marubozu)
-           c.close > c.open &&           // Nến này xanh (Marubozu)
-           cBody > cRange * 0.8 &&       // Thân > 80% range
-           c.open > p.close);            // Gap up (mở cửa trên đóng cửa nến trước)
-  }
+bool IsHanareGoteZoko(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) { // Breakaway 5 nến đáy
+   return (c5.close < c5.open &&
+           c4.close < c4.open && c4.open < c5.close &&
+           c3.close <= c3.open && c2.close <= c2.open &&
+           c1.close > c1.open && c1.close > c4.open);
+}
 
-bool IsKickingBear(MqlRates &c, MqlRates &p) // Sell
-  {
-   double pBody = MathAbs(p.close - p.open);
-   double pRange = p.high - p.low;
-   double cBody = MathAbs(c.close - c.open);
-   double cRange = c.high - c.low;
-   if(pRange == 0 || cRange == 0) return false;
-   
-   return (p.close > p.open &&          // Nến trước xanh (Marubozu)
-           pBody > pRange * 0.8 &&       // Thân > 80% range
-           c.close < c.open &&           // Nến này đỏ (Marubozu)
-           cBody > cRange * 0.8 &&       // Thân > 80% range
-           c.open < p.close);            // Gap down
-  }
+bool IsHanareShichiteZoko(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5, MqlRates &c6, MqlRates &c7) { // Breakaway 7 nến đáy
+   return (c7.close < c7.open &&
+           c6.close < c6.open && c6.open < c7.close &&
+           c5.high < c7.open && c4.high < c7.open && c3.high < c7.open && c2.high < c7.open &&
+           MathAbs(c2.close-c2.open) < (c7.open-c7.close)*0.5 &&
+           c1.close > c1.open && c1.close > c6.open);
+}
 
-//+------------------------------------------------------------------+
-//| 3. Abandoned Baby (3 nến) - Doji gap cách ly                     |
-//+------------------------------------------------------------------+
-bool IsAbandonedBabyBull(MqlRates &c, MqlRates &m, MqlRates &p) // Buy
-  {
-   double mBody = MathAbs(m.close - m.open);
-   double mRange = m.high - m.low;
-   if(mRange == 0) return false;
-   
-   return (p.close < p.open &&           // Nến 1 đỏ dài
-           mBody < mRange * 0.1 &&        // Nến 2 Doji (thân < 10% range)
-           m.high < p.low &&              // Gap down giữa nến 1 và Doji
-           c.close > c.open &&            // Nến 3 xanh
-           c.low > m.high);               // Gap up giữa Doji và nến 3
-  }
+bool IsKaiDakisen(MqlRates &c1, MqlRates &c2) { // Nhấn chìm tăng
+   return (c2.close < c2.open && c1.close > c1.open && c1.close > c2.open && c1.open < c2.close);
+}
 
-bool IsAbandonedBabyBear(MqlRates &c, MqlRates &m, MqlRates &p) // Sell
-  {
-   double mBody = MathAbs(m.close - m.open);
-   double mRange = m.high - m.low;
-   if(mRange == 0) return false;
-   
-   return (p.close > p.open &&           // Nến 1 xanh dài
-           mBody < mRange * 0.1 &&        // Nến 2 Doji
-           m.low > p.high &&              // Gap up giữa nến 1 và Doji
-           c.close < c.open &&            // Nến 3 đỏ
-           c.high < m.low);               // Gap down giữa Doji và nến 3
-  }
+bool IsSaigoDakisenBuy(MqlRates &c1, MqlRates &c2) { // Nhấn chìm tăng cuối cùng đáy
+   return (c2.close < c2.open && c1.close > c1.open && 
+           c1.close > c2.high && c1.open < c2.low);
+}
+
+bool IsInInHarami(MqlRates &c1, MqlRates &c2) { // Đen bồng Đen
+   return (c2.close < c2.open && c1.close < c1.open && 
+           c1.open < c2.open && c1.close > c2.close && 
+           MathAbs(c1.open-c1.close) < MathAbs(c2.open-c2.close)*0.3);
+}
+
+bool IsKaiYoInHarami(MqlRates &c1, MqlRates &c2) { // Đen bồng Trắng
+   return (c2.close < c2.open && c1.close > c1.open &&
+           c1.close < c2.open && c1.open > c2.close &&
+           MathAbs(c1.close-c1.open) < MathAbs(c2.open-c2.close)*0.3);
+}
 
 //+------------------------------------------------------------------+
-//| 4. Morning Doji Star / Evening Doji Star (3 nến)                 |
+//| SAKATA TOP MODELS (SELL)                                         |
 //+------------------------------------------------------------------+
-bool IsMorningDojiStar(MqlRates &c, MqlRates &m, MqlRates &p) // Buy
-  {
-   double mBody = MathAbs(m.close - m.open);
-   double mRange = m.high - m.low;
-   double pBody = MathAbs(p.close - p.open);
-   if(mRange == 0) return false;
-   
-   return (p.close < p.open &&           // Nến 1 đỏ dài
-           pBody > (p.high-p.low)*0.5 &&  // Thân nến 1 lớn
-           mBody < mRange * 0.1 &&        // Nến 2 Doji chính xác
-           m.high < p.low &&              // Doji gap down
-           c.close > c.open &&            // Nến 3 xanh
-           c.close > (p.open + p.close)/2); // Đóng trên 50% nến 1
-  }
+bool IsSanbaGarasu(MqlRates &c1, MqlRates &c2, MqlRates &c3) { // 3 Con quạ đen
+   return (c3.close < c3.open && c2.close < c2.open && c1.close < c1.open &&
+           c1.close < c2.close && c2.close < c3.close &&
+           c1.low < c2.low && c2.low < c3.low);
+}
 
-bool IsEveningDojiStar(MqlRates &c, MqlRates &m, MqlRates &p) // Sell
-  {
-   double mBody = MathAbs(m.close - m.open);
-   double mRange = m.high - m.low;
-   double pBody = MathAbs(p.close - p.open);
-   if(mRange == 0) return false;
-   
-   return (p.close > p.open &&           // Nến 1 xanh dài
-           pBody > (p.high-p.low)*0.5 &&  // Thân nến 1 lớn
-           mBody < mRange * 0.1 &&        // Nến 2 Doji chính xác
-           m.low > p.high &&              // Doji gap up
-           c.close < c.open &&            // Nến 3 đỏ
-           c.close < (p.open + p.close)/2); // Đóng dưới 50% nến 1
-  }
+bool IsSanteHanareYoseSen(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4) { // Quạ xa tổ (4 nến đỉnh)
+   return (c4.close > c4.open && 
+           c3.close > c3.open && c2.close > c2.open && 
+           c2.high < c4.high + (c4.high-c4.low) && // mấp mé trên đỉnh
+           c1.close < c1.open && c1.close < c3.low);
+}
 
-//+------------------------------------------------------------------+
-//| 5. Morning Star / Evening Star (3 nến)                           |
-//+------------------------------------------------------------------+
-bool IsMorningStar(MqlRates &c, MqlRates &m, MqlRates &p)
-  {
-   return (p.close < p.open && // 1. Nến đỏ dài
-           MathAbs(m.close - m.open) < (p.high-p.low)*0.3 && // 2. Nến giữa nhỏ (Star)
-           c.close > c.open && // 3. Nến xanh
-           c.close > (p.open + p.close)/2); // Đóng trên 50% nến 1
-  }
+bool IsKabuse(MqlRates &c1, MqlRates &c2) { // Mây đen bao phủ
+   return (c2.close > c2.open && 
+           c1.close < c1.open && 
+           c1.open > c2.high &&
+           c1.close < (c2.open + c2.close)/2 && c1.close > c2.open);
+}
 
-bool IsEveningStar(MqlRates &c, MqlRates &m, MqlRates &p)
-  {
-   return (p.close > p.open && // 1. Nến xanh dài
-           MathAbs(m.close - m.open) < (p.high-p.low)*0.3 && // 2. Nến giữa nhỏ
-           c.close < c.open && // 3. Nến đỏ
-           c.close < (p.open + p.close)/2); // Đóng dưới 50% nến 1
-  }
+bool IsSutegoSen(MqlRates &c1, MqlRates &c2, MqlRates &c3) { // Đứa trẻ bị bỏ rơi ở đỉnh
+   double c2Body = MathAbs(c2.open - c2.close);
+   return (c3.close > c3.open && 
+           c2Body < (c2.high - c2.low)*0.1 && c2.low > c3.high &&
+           c1.close < c1.open && c1.high < c2.low);
+}
 
-//+------------------------------------------------------------------+
-//| 6. Three Inside Up / Three Inside Down (3 nến)                   |
-//+------------------------------------------------------------------+
-bool IsThreeInsideUp(MqlRates &c, MqlRates &m, MqlRates &p) // Buy
-  {
-   return (p.close < p.open &&           // Nến 1 đỏ dài
-           m.close > m.open &&            // Nến 2 xanh
-           m.high < p.high &&             // Nến 2 nằm trong nến 1 (Inside Bar)
-           m.low > p.low &&
-           m.close > (p.open + p.close)/2 && // Đóng trên 50% nến 1
-           c.close > c.open &&            // Nến 3 xanh
-           c.close > p.open);             // Nến 3 đóng trên đỉnh nến 1
-  }
+bool IsJouiDakisen(MqlRates &c1, MqlRates &c2) { // Nhấn chìm giảm
+   return (c2.close > c2.open && c1.close < c1.open && c1.open > c2.close && c1.close < c2.open);
+}
 
-bool IsThreeInsideDown(MqlRates &c, MqlRates &m, MqlRates &p) // Sell
-  {
-   return (p.close > p.open &&           // Nến 1 xanh dài
-           m.close < m.open &&            // Nến 2 đỏ
-           m.high < p.high &&             // Nến 2 nằm trong nến 1 (Inside Bar)
-           m.low > p.low &&
-           m.close < (p.open + p.close)/2 && // Đóng dưới 50% nến 1
-           c.close < c.open &&            // Nến 3 đỏ
-           c.close < p.open);             // Nến 3 đóng dưới đáy nến 1
-  }
+bool IsSaigoDakisenSell(MqlRates &c1, MqlRates &c2) { // Nhấn chìm giảm cuối cùng đỉnh
+   return (c2.close > c2.open && c1.close < c1.open && 
+           c1.open > c2.high && c1.close < c2.low);
+}
 
-//+------------------------------------------------------------------+
-//| 7. Three Outside Up / Three Outside Down (3 nến)                 |
-//+------------------------------------------------------------------+
-bool IsThreeOutsideUp(MqlRates &c, MqlRates &m, MqlRates &p) // Buy
-  {
-   return (p.close < p.open &&           // Nến 1 đỏ
-           m.close > m.open &&            // Nến 2 xanh (Engulfing)
-           m.close > p.open &&            // Nến 2 đóng trên open nến 1
-           m.open < p.close &&            // Nến 2 mở dưới close nến 1
-           c.close > c.open &&            // Nến 3 xanh
-           c.close > m.close);            // Nến 3 đóng cao hơn nến 2
-  }
+bool IsYoYoHarami(MqlRates &c1, MqlRates &c2) { // Trắng bồng Trắng
+   return (c2.close > c2.open && c1.close > c1.open && 
+           c1.open > c2.open && c1.close < c2.close && 
+           MathAbs(c1.close-c1.open) < MathAbs(c2.close-c2.open)*0.3);
+}
 
-bool IsThreeOutsideDown(MqlRates &c, MqlRates &m, MqlRates &p) // Sell
-  {
-   return (p.close > p.open &&           // Nến 1 xanh
-           m.close < m.open &&            // Nến 2 đỏ (Engulfing)
-           m.close < p.open &&            // Nến 2 đóng dưới open nến 1
-           m.open > p.close &&            // Nến 2 mở trên close nến 1
-           c.close < c.open &&            // Nến 3 đỏ
-           c.close < m.close);            // Nến 3 đóng thấp hơn nến 2
-  }
-
-//+------------------------------------------------------------------+
-//| 8. Three White Soldiers / Three Black Crows (3 nến)              |
-//+------------------------------------------------------------------+
-bool IsThreeSoldiers(MqlRates &c, MqlRates &p, MqlRates &pp)
-  {
-   return (c.close > c.open && p.close > p.open && pp.close > pp.open && // 3 nến xanh
-           c.close > p.close && p.close > pp.close && // Đóng cửa cao dần
-           c.high > p.high && p.high > pp.high); // Đỉnh cao dần (lực mạnh)
-  }
-
-bool IsThreeCrows(MqlRates &c, MqlRates &p, MqlRates &pp)
-  {
-   return (c.close < c.open && p.close < p.open && pp.close < pp.open && // 3 nến đỏ
-           c.close < p.close && p.close < pp.close && // Đóng cửa thấp dần
-           c.low < p.low && p.low < pp.low); // Đáy thấp dần
-  }
-
-//+------------------------------------------------------------------+
-//| 9. Engulfing (2 nến)                                             |
-//+------------------------------------------------------------------+
-bool IsEngulfing(MqlRates &c, MqlRates &p, int dir)
-  {
-   if(dir==1) return (c.close > c.open && c.close > p.high && c.open < p.low); // Bullish
-   if(dir==-1) return (c.close < c.open && c.close < p.low && c.open > p.high); // Bearish
-   return false;
-  }
-
-//+------------------------------------------------------------------+
-//| 10. Breakaway (5 nến) - Gap mạnh rồi đảo chiều                  |
-//+------------------------------------------------------------------+
-bool IsBreakawayBull(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) // Buy
-  {
-   // c5=nến cũ nhất, c1=nến mới nhất
-   return (c5.close < c5.open &&          // Nến 1 đỏ dài
-           c4.close < c4.open &&           // Nến 2 đỏ gap down
-           c4.open < c5.close &&
-           c3.close < c3.open &&           // Nến 3 đỏ (hoặc nhỏ)
-           c2.close < c2.open &&           // Nến 4 đỏ nhỏ (giảm momentum)
-           MathAbs(c2.close-c2.open) < MathAbs(c5.close-c5.open)*0.5 &&
-           c1.close > c1.open &&           // Nến 5 xanh dài đảo chiều
-           c1.close > c4.open);            // Đóng trên gap
-  }
-
-bool IsBreakawayBear(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) // Sell
-  {
-   return (c5.close > c5.open &&          // Nến 1 xanh dài
-           c4.close > c4.open &&           // Nến 2 xanh gap up
-           c4.open > c5.close &&
-           c3.close > c3.open &&           // Nến 3 xanh (hoặc nhỏ)
-           c2.close > c2.open &&           // Nến 4 xanh nhỏ
-           MathAbs(c2.close-c2.open) < MathAbs(c5.close-c5.open)*0.5 &&
-           c1.close < c1.open &&           // Nến 5 đỏ dài đảo chiều
-           c1.close < c4.open);            // Đóng dưới gap
-  }
-
-//+------------------------------------------------------------------+
-//| 11. Mat Hold (5 nến) - Continuation sau pullback                 |
-//+------------------------------------------------------------------+
-bool IsMatHoldBull(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) // Buy
-  {
-   // c5=nến cũ nhất, c1=nến mới nhất
-   return (c5.close > c5.open &&          // Nến 1 xanh dài
-           MathAbs(c5.close-c5.open) > (c5.high-c5.low)*0.5 &&
-           c4.close < c4.open &&           // Nến 2 đỏ nhỏ (pullback)
-           c4.low > c5.low &&              // Không phá đáy nến 1
-           c3.close < c3.open &&           // Nến 3 đỏ nhỏ
-           c3.low > c5.low &&
-           c2.close < c2.open &&           // Nến 4 đỏ nhỏ
-           c2.low > c5.low &&
-           c1.close > c1.open &&           // Nến 5 xanh dài
-           c1.close > c5.close);           // Đóng trên đỉnh nến 1
-  }
-
-bool IsMatHoldBear(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) // Sell
-  {
-   return (c5.close < c5.open &&          // Nến 1 đỏ dài
-           MathAbs(c5.close-c5.open) > (c5.high-c5.low)*0.5 &&
-           c4.close > c4.open &&           // Nến 2 xanh nhỏ (pullback)
-           c4.high < c5.high &&
-           c3.close > c3.open &&           // Nến 3 xanh nhỏ
-           c3.high < c5.high &&
-           c2.close > c2.open &&           // Nến 4 xanh nhỏ
-           c2.high < c5.high &&
-           c1.close < c1.open &&           // Nến 5 đỏ dài
-           c1.close < c5.close);           // Đóng dưới đáy nến 1
-  }
-
-//+------------------------------------------------------------------+
-//| 12. Rising Three Methods / Falling Three Methods (5 nến)         |
-//+------------------------------------------------------------------+
-bool IsRisingThreeMethods(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) // Buy
-  {
-   // c5=xanh dài -> c4,c3,c2=3 nến nhỏ pullback -> c1=xanh dài
-   return (c5.close > c5.open &&          // Nến 1 xanh dài
-           MathAbs(c5.close-c5.open) > (c5.high-c5.low)*0.5 &&
-           c4.close < c4.open &&           // Nến 2 đỏ nhỏ
-           c3.close < c3.open &&           // Nến 3 đỏ nhỏ
-           c2.close < c2.open &&           // Nến 4 đỏ nhỏ
-           c4.high < c5.high &&            // Không vượt đỉnh nến 1
-           c3.high < c5.high &&
-           c2.high < c5.high &&
-           c2.low > c5.low &&              // Không phá đáy nến 1
-           c1.close > c1.open &&           // Nến 5 xanh dài
-           c1.close > c5.close);           // Đóng trên đỉnh nến 1
-  }
-
-bool IsFallingThreeMethods(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) // Sell
-  {
-   // c5=đỏ dài -> c4,c3,c2=3 nến nhỏ pullback lên -> c1=đỏ dài
-   return (c5.close < c5.open &&          // Nến 1 đỏ dài
-           MathAbs(c5.close-c5.open) > (c5.high-c5.low)*0.5 &&
-           c4.close > c4.open &&           // Nến 2 xanh nhỏ
-           c3.close > c3.open &&           // Nến 3 xanh nhỏ
-           c2.close > c2.open &&           // Nến 4 xanh nhỏ
-           c4.low > c5.low &&              // Không phá đáy nến 1
-           c3.low > c5.low &&
-           c2.low > c5.low &&
-           c2.high < c5.high &&            // Không vượt đỉnh nến 1
-           c1.close < c1.open &&           // Nến 5 đỏ dài
-           c1.close < c5.close);           // Đóng dưới đáy nến 1
-  }
-
-//+------------------------------------------------------------------+
-//| 13. Ladder Bottom / Ladder Top (5 nến)                           |
-//+------------------------------------------------------------------+
-bool IsLadderBottom(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) // Buy
-  {
-   // c5,c4,c3 = 3 nến đỏ giảm dần -> c2 = nến đỏ có râu trên dài -> c1 = xanh gap up
-   return (c5.close < c5.open &&          // Nến 1 đỏ
-           c4.close < c4.open &&           // Nến 2 đỏ
-           c3.close < c3.open &&           // Nến 3 đỏ
-           c4.close < c5.close &&          // Đóng cửa thấp dần
-           c3.close < c4.close &&
-           c2.close < c2.open &&           // Nến 4 đỏ nhưng có râu trên dài (hesitation)
-           (c2.high - MathMax(c2.open,c2.close)) > MathAbs(c2.close-c2.open) &&
-           c1.close > c1.open &&           // Nến 5 xanh
-           c1.open > c2.open);             // Gap up hoặc mở cao hơn
-  }
-
-bool IsLadderTop(MqlRates &c1, MqlRates &c2, MqlRates &c3, MqlRates &c4, MqlRates &c5) // Sell
-  {
-   // c5,c4,c3 = 3 nến xanh tăng dần -> c2 = nến xanh có râu dưới dài -> c1 = đỏ gap down
-   return (c5.close > c5.open &&          // Nến 1 xanh
-           c4.close > c4.open &&           // Nến 2 xanh
-           c3.close > c3.open &&           // Nến 3 xanh
-           c4.close > c5.close &&          // Đóng cửa cao dần
-           c3.close > c4.close &&
-           c2.close > c2.open &&           // Nến 4 xanh có râu dưới dài (hesitation)
-           (MathMin(c2.open,c2.close) - c2.low) > MathAbs(c2.close-c2.open) &&
-           c1.close < c1.open &&           // Nến 5 đỏ
-           c1.open < c2.open);             // Gap down hoặc mở thấp hơn
-  }
+bool IsJouiYoInHarami(MqlRates &c1, MqlRates &c2) { // Trắng bồng Đen
+   return (c2.close > c2.open && c1.close < c1.open &&
+           c1.open < c2.close && c1.close > c2.open &&
+           MathAbs(c1.open-c1.close) < MathAbs(c2.close-c2.open)*0.3);
+}
 
 
 //+------------------------------------------------------------------+
@@ -633,6 +414,8 @@ bool IsCoreStable() {
 
 
 bool IsWithinTradingHours() {
+   if(!InpEnableTimeManagement) return true; // Cày 24/7 nếu tắt Time Management
+   
    MqlDateTime dt;
    TimeCurrent(dt);
    
@@ -695,13 +478,13 @@ void ManageMartingale() {
    
    double totalProfit = GetTotalFloatingProfit();
    
-   // Tính mức lãi tối thiểu (chuyển từ points sang tiền)
+   // Tính Break-even Price trung bình của cụm lệnh hiện tại
+   double totalLots = GetTotalLots();
    double minProfit = 0.0;
-   if(InpMartClosePips > 0) {
+   if(InpMartClosePips > 0 && totalLots > 0) {
       double tickVal = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
       double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
-      double totalLots = GetTotalLots();
       if(tickSize > 0 && point > 0)
          minProfit = InpMartClosePips * point * (tickVal / tickSize) * totalLots;
    }
@@ -722,18 +505,42 @@ void ManageMartingale() {
    
    if(totalProfit >= minProfit && martingaleLevel > 0) {
       CloseAllOrders();
-      Print("Chronos: Chuỗi Martingale THẮNG! P/L=", totalProfit, " (Min=", DoubleToString(minProfit,2), ")");
+      Print("Chronos: Chuỗi Martingale THẮNG! P/L=", totalProfit, " (Target P/L=", minProfit, ")");
       martingaleLevel = 0;
       return;
    }
 
    if(dir == 0) return;
    
+   // Take profit cho lệnh đầu tiên
+   if(martingaleLevel == 0 && InpTakeProfitPips > 0) {
+      double distTP = (dir == 1) ? (currentPrice - lastPrice) : (lastPrice - currentPrice);
+      distTP = distTP / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      if(distTP >= InpTakeProfitPips) {
+         CloseAllOrders();
+         Print("Chronos: TAKE PROFIT lệnh đầu! P/L=", totalProfit);
+         return;
+      }
+   }
+   
+   // Stop loss cho lệnh đầu tiên (Chỉ dùng khi trade 1 lệnh KHÔNG DCA)
+   if(InpMartMode == MARTINGALE_MODE_NONE && martingaleLevel == 0 && InpStopLossPips > 0) {
+      double distSL = (dir == 1) ? (lastPrice - currentPrice) : (currentPrice - lastPrice);
+      distSL = distSL / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+      if(distSL >= InpStopLossPips) {
+         CloseAllOrders();
+         Print("Chronos: STOP LOSS lệnh đầu! P/L=", totalProfit);
+         return;
+      }
+   }
+   
    double dist = MathAbs(currentPrice - lastPrice) / SymbolInfoDouble(_Symbol, SYMBOL_POINT);
    
    bool isAgainst = (dir == 1 && currentPrice < lastPrice) || (dir == -1 && currentPrice > lastPrice);
    
    if(isAgainst && dist >= InpMartGridPips) {
+      if(InpMartMode == MARTINGALE_MODE_NONE) return; // Nếu chọn chế độ Không DCA thì ngồi chờ SL/TP
+      
       martingaleLevel++;
       double lot = CalculateLot(martingaleLevel);
       
@@ -798,6 +605,8 @@ void CloseAllOrders() {
 }
 
 void ManageIntradayExit() {
+   if(!InpEnableTimeManagement) return; // Bỏ qua nếu tắt Time Management
+   
    MqlDateTime dt; TimeCurrent(dt);
    if(dt.hour >= InpCloseHour) {
       // Logic cũ: Chỉ đóng khi lời

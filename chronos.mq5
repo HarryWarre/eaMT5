@@ -61,6 +61,11 @@ input int    InpNewsBufferMins = 60;      // Né bão tin tức (phút trước/
 input group "=== ENDURANCE (Sức bền) ==="
 input int    InpMaxLossesPerDay = 5;       // Số lần thua tối đa/ngày -> Ngất xỉu
 
+input group "=== GIAO DIỆN (UI) ==="
+input bool   InpShowDashboard   = true;    // Hiển thị bảng điều khiển
+input bool   InpShowIchimoku    = true;    // Hiển thị Ichimoku Indicator
+input bool   InpShowForecast    = true;    // Hiển thị Dự báo chu kỳ thời gian (Kihon Suchi)
+
 input int    InpMagic           = 202611;  // Magic Number (Ichimoku)
 
 //+------------------------------------------------------------------+
@@ -68,10 +73,15 @@ input int    InpMagic           = 202611;  // Magic Number (Ichimoku)
 //+------------------------------------------------------------------+
 CTrade         Trade;
 int            handleRSI;
+int            handleIchi;        // Handle cho Ichimoku
 int            dailyLosses;       // Đếm số lần thua trong ngày
 datetime       lastBarTime;       // Kiểm soát chỉ trade 1 lần/nến
 int            martingaleLevel;   // Tầng Martingale hiện tại
 double         initialBalance;    // Vốn ban đầu
+
+string         lastPatternDetected = "None"; // Lưu mô hình nến gần nhất
+int            barsFromHigh = 0;             // Lưu số nến từ đỉnh gần nhất
+int            barsFromLow = 0;              // Lưu số nến từ đáy gần nhất
 
 // Global variables for Smart Hedge
 double         lastBreakEvenClosePrice = 0.0; // Giá đóng hòa vốn gần nhất
@@ -125,19 +135,27 @@ int OnInit()
    Trade.SetExpertMagicNumber(InpMagic);
    
    handleRSI = iRSI(_Symbol, InpTimeframe, InpRSIPeriod, PRICE_CLOSE);
+   handleIchi = iIchimoku(_Symbol, InpTimeframe, 9, 26, 52); // Mặc định 9-26-52
    
-   if(handleRSI == INVALID_HANDLE)
+   if(handleRSI == INVALID_HANDLE || handleIchi == INVALID_HANDLE)
      {
-      Print("Chronos: Lỗi khởi tạo RSI.");
+      Print("Chronos: Lỗi khởi tạo Indicators.");
       return INIT_FAILED;
      }
+     
+   if(InpShowIchimoku) {
+      ChartIndicatorAdd(0, 0, handleIchi);
+   }
    
    dailyLosses     = 0;
    lastBarTime      = 0;
    martingaleLevel  = 0;
    initialBalance   = AccountInfoDouble(ACCOUNT_BALANCE);
    
-   Print("Chronos: Hệ thống Price Action Mở Rộng sẵn sàng (13 Models).");
+   if(InpShowDashboard) DrawDashboard();
+   if(InpShowForecast) DrawKihonSuchiForecasts();
+   
+   Print("Chronos: Hệ thống Price Action Mở Rộng sẵn sàng (16 Models).");
    return INIT_SUCCEEDED;
   }
 
@@ -147,6 +165,9 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    IndicatorRelease(handleRSI);
+   IndicatorRelease(handleIchi);
+   if(InpShowDashboard) RemoveDashboard();
+   if(InpShowForecast) RemoveForecasts();
    Print("Chronos: Rời vòng tròn. Reason: ", reason);
   }
 
@@ -181,6 +202,10 @@ void OnTick()
    int signal = CheckIchimokuSignal();
    if(signal != 0)
       ExecuteEntry(signal);
+      
+   // Cập nhật lại UI sau mỗi tick
+   if(InpShowDashboard) DrawDashboard();
+   if(IsNewBar() && InpShowForecast) DrawKihonSuchiForecasts();
   }
 
 //+------------------------------------------------------------------+
@@ -207,6 +232,9 @@ int CheckIchimokuSignal()
    int highestIdx = iHighest(_Symbol, InpTimeframe, MODE_HIGH, InpScanBars, 1);
    int lowestIdx = iLowest(_Symbol, InpTimeframe, MODE_LOW, InpScanBars, 1);
    
+   barsFromHigh = highestIdx;
+   barsFromLow = lowestIdx;
+   
    bool isCycleFromHigh = IsIchimokuCycle(highestIdx); // Đang ở chu kỳ tính từ đỉnh (Kỳ vọng tạo đáy/đảo chiều lên)
    bool isCycleFromLow = IsIchimokuCycle(lowestIdx);   // Đang ở chu kỳ tính từ đáy (Kỳ vọng tạo đỉnh/đảo chiều xuống)
    
@@ -222,24 +250,24 @@ int CheckIchimokuSignal()
    bool isSell = false;
    
    // --- KÍCH HOẠT BUY (8 Mẫu Tạo Đáy) ---
-   if(IsAkaSanpei(rates[0], rates[1], rates[2])) isBuy = true;
-   if(IsSashikomisen(rates[0], rates[1])) isBuy = true;
-   if(IsHanareGoteZoko(rates[0], rates[1], rates[2], rates[3], rates[4])) isBuy = true;
-   if(IsHanareShichiteZoko(rates[0], rates[1], rates[2], rates[3], rates[4], rates[5], rates[6])) isBuy = true;
-   if(IsKaiDakisen(rates[0], rates[1])) isBuy = true;
-   if(IsSaigoDakisenBuy(rates[0], rates[1])) isBuy = true;
-   if(IsInInHarami(rates[0], rates[1])) isBuy = true;
-   if(IsKaiYoInHarami(rates[0], rates[1])) isBuy = true;
+   if(IsAkaSanpei(rates[0], rates[1], rates[2])) { isBuy = true; lastPatternDetected = "Aka Sanpei (Đáy)"; }
+   if(IsSashikomisen(rates[0], rates[1])) { isBuy = true; lastPatternDetected = "Sashikomisen (Đáy)"; }
+   if(IsHanareGoteZoko(rates[0], rates[1], rates[2], rates[3], rates[4])) { isBuy = true; lastPatternDetected = "Hanare Gote Zoko (Đáy)"; }
+   if(IsHanareShichiteZoko(rates[0], rates[1], rates[2], rates[3], rates[4], rates[5], rates[6])) { isBuy = true; lastPatternDetected = "Hanare Shichite Zoko (Đáy)"; }
+   if(IsKaiDakisen(rates[0], rates[1])) { isBuy = true; lastPatternDetected = "Kai Dakisen (Đáy)"; }
+   if(IsSaigoDakisenBuy(rates[0], rates[1])) { isBuy = true; lastPatternDetected = "Saigo Dakisen (Đáy)"; }
+   if(IsInInHarami(rates[0], rates[1])) { isBuy = true; lastPatternDetected = "In In Harami (Đáy)"; }
+   if(IsKaiYoInHarami(rates[0], rates[1])) { isBuy = true; lastPatternDetected = "Kai Yo In Harami (Đáy)"; }
    
    // --- KÍCH HOẠT SELL (8 Mẫu Tạo Đỉnh) ---
-   if(IsSanbaGarasu(rates[0], rates[1], rates[2])) isSell = true;
-   if(IsSanteHanareYoseSen(rates[0], rates[1], rates[2], rates[3])) isSell = true;
-   if(IsKabuse(rates[0], rates[1])) isSell = true;
-   if(IsSutegoSen(rates[0], rates[1], rates[2])) isSell = true;
-   if(IsJouiDakisen(rates[0], rates[1])) isSell = true;
-   if(IsSaigoDakisenSell(rates[0], rates[1])) isSell = true;
-   if(IsYoYoHarami(rates[0], rates[1])) isSell = true;
-   if(IsJouiYoInHarami(rates[0], rates[1])) isSell = true;
+   if(IsSanbaGarasu(rates[0], rates[1], rates[2])) { isSell = true; lastPatternDetected = "Sanba Garasu (Đỉnh)"; }
+   if(IsSanteHanareYoseSen(rates[0], rates[1], rates[2], rates[3])) { isSell = true; lastPatternDetected = "Sante Hanare (Đỉnh)"; }
+   if(IsKabuse(rates[0], rates[1])) { isSell = true; lastPatternDetected = "Kabuse (Đỉnh)"; }
+   if(IsSutegoSen(rates[0], rates[1], rates[2])) { isSell = true; lastPatternDetected = "Sutego Sen (Đỉnh)"; }
+   if(IsJouiDakisen(rates[0], rates[1])) { isSell = true; lastPatternDetected = "Joui Dakisen (Đỉnh)"; }
+   if(IsSaigoDakisenSell(rates[0], rates[1])) { isSell = true; lastPatternDetected = "Saigo Dakisen (Đỉnh)"; }
+   if(IsYoYoHarami(rates[0], rates[1])) { isSell = true; lastPatternDetected = "Yo Yo Harami (Đỉnh)"; }
+   if(IsJouiYoInHarami(rates[0], rates[1])) { isSell = true; lastPatternDetected = "Joui Yo In Harami (Đỉnh)"; }
    
    // Hợp lưu BUY: Thời gian từ Đỉnh + D1 Xanh + RSI > 50 + PA Buy
    if(isCycleFromHigh && d1Dir == 1 && rsi > 50.0 && isBuy) {
@@ -650,6 +678,138 @@ void ManageDrawdownProtection() {
          Print("Chronos: EMERGENCY STOP! Drawdown Limit Reached (", DoubleToString(ddPct, 2), "%). Closing ALL.");
       }
    }
+}
+
+//+------------------------------------------------------------------+
+//| GIAO DIỆN HIỂN THỊ (DASHBOARD)                                   |
+//+------------------------------------------------------------------+
+void AddCustomLabel(string name, string text, int x, int y, color clr, int fontSize = 10, string fontName = "Arial") {
+   if(ObjectFind(0, name) < 0) {
+      ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, name, OBJPROP_XDISTANCE, x);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, y);
+   }
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, fontSize);
+   ObjectSetString(0, name, OBJPROP_FONT, fontName);
+}
+
+void DrawDashboard() {
+   int xStart = 20;
+   int yStart = 20;
+   int yStep = 25; // Tăng khoảng cách giữa các dòng
+   int row = 0;
+   
+   double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+   double eq = AccountInfoDouble(ACCOUNT_EQUITY);
+   double dd = (bal > 0) ? ((bal - eq) / bal * 100.0) : 0;
+   
+   // Header
+   AddCustomLabel("chronos_title", "CHRONOS BOT - TỬ CHIẾN (Sakata + Kihon Suchi)", xStart, yStart + row*yStep, clrGold, 12, "Arial Bold");
+   row++;
+   AddCustomLabel("chronos_separator", "--------------------------------------------------------", xStart, yStart + row*yStep, clrGray);
+   row++;
+   
+   // Account Stats
+   string accText = StringFormat("Balance: $%.2f | Equity: $%.2f", bal, eq);
+   AddCustomLabel("chronos_acc", accText, xStart, yStart + row*yStep, clrWhite);
+   row++;
+   
+   string ddText = StringFormat("Current Drawdown: %.2f%% (Max Limit: %.2f%%)", dd, InpMaxDrawdownPct);
+   color ddClr = (dd > InpMaxDrawdownPct * 0.8) ? clrRed : clrLightGreen;
+   AddCustomLabel("chronos_dd", ddText, xStart, yStart + row*yStep, ddClr);
+   row++;
+   
+   // Operations Stats
+   string martText = StringFormat("Trade State: %d Orders | Martingale Level: L%d", CountMyOrders(), martingaleLevel);
+   AddCustomLabel("chronos_mart", martText, xStart, yStart + row*yStep, clrTurquoise);
+   row++;
+   
+   double pl = GetTotalFloatingProfit();
+   string plText = StringFormat("Floating P/L: $%.2f", pl);
+   color plClr = (pl >= 0) ? clrLightGreen : clrRed;
+   AddCustomLabel("chronos_pl", plText, xStart, yStart + row*yStep, plClr);
+   row++;
+   
+   string lossText = StringFormat("Daily Losses: %d / %d", dailyLosses, InpMaxLossesPerDay);
+   AddCustomLabel("chronos_loss", lossText, xStart, yStart + row*yStep, clrOrange);
+   row++;
+   
+   // Analytics
+   AddCustomLabel("chronos_separator2", "--------------------------------------------------------", xStart, yStart + row*yStep, clrGray);
+   row++;
+   
+   string ptnText = "Last PA Pattern: " + lastPatternDetected;
+   AddCustomLabel("chronos_pattern", ptnText, xStart, yStart + row*yStep, clrYellow);
+   row++;
+   
+   string ichiText = StringFormat("Kihon Suchi: %d bars from High | %d bars from Low", barsFromHigh, barsFromLow);
+   AddCustomLabel("chronos_ichi", ichiText, xStart, yStart + row*yStep, clrLightBlue);
+   
+   ChartRedraw();
+}
+
+void RemoveDashboard() {
+   ObjectsDeleteAll(0, "chronos_");
+   ChartRedraw();
+}
+
+//+------------------------------------------------------------------+
+//| VẼ DỰ BÁO TƯƠNG LAI KIHON SUCHI Y GIAO DIỆN                      |
+//+------------------------------------------------------------------+
+void DrawKihonSuchiForecasts() {
+   RemoveForecasts(); // Xóa cũ trước khi vẽ mới
+   
+   int highestIdx = iHighest(_Symbol, InpTimeframe, MODE_HIGH, InpScanBars, 1);
+   int lowestIdx = iLowest(_Symbol, InpTimeframe, MODE_LOW, InpScanBars, 1);
+   
+   if(highestIdx < 0 || lowestIdx < 0) return;
+   
+   // Chọn đỉnh hoặc đáy gần nhất làm tâm điểm
+   int originIdx = (highestIdx < lowestIdx) ? highestIdx : lowestIdx;
+   datetime originTime = iTime(_Symbol, InpTimeframe, originIdx);
+   bool isHigh = (originIdx == highestIdx);
+   
+   int ichiNumbers[] = {9, 17, 26, 33, 42, 51, 65, 76, 83, 97, 101, 129, 172, 200, 257};
+   
+   for(int i = 0; i < ArraySize(ichiNumbers); i++) {
+      int targetBars = ichiNumbers[i];
+      int barsElapsed = originIdx; 
+      
+      // Nếu chu kỳ tương lai chưa tới (Số nến cần > Số nến đã chạy)
+      if(targetBars > barsElapsed) {
+         int futureBars = targetBars - barsElapsed;
+         datetime futureTime = originTime + futureBars * PeriodSeconds(InpTimeframe); // Ước tính thời gian
+         
+         string objName = "chronos_fc_" + IntegerToString(targetBars);
+         ObjectCreate(0, objName, OBJ_VLINE, 0, futureTime, 0);
+         ObjectSetInteger(0, objName, OBJPROP_COLOR, (isHigh) ? clrDodgerBlue : clrHotPink);
+         ObjectSetInteger(0, objName, OBJPROP_STYLE, STYLE_DOT);
+         ObjectSetInteger(0, objName, OBJPROP_WIDTH, 1);
+         ObjectSetInteger(0, objName, OBJPROP_BACK, true); // Chìm ra sau nến
+         ObjectSetString(0, objName, OBJPROP_TEXT, "Cycle " + IntegerToString(targetBars));
+         ObjectSetString(0, objName, OBJPROP_TOOLTIP, "\n"); // Disable tooltip for clean look
+         
+         // Thêm nhãn chữ (Text) bên trên Line
+         string labelName = "chronos_lbl_" + IntegerToString(targetBars);
+         ObjectCreate(0, labelName, OBJ_TEXT, 0, futureTime, 0); // 0 price for now, we will position it
+         
+         // Đẩy chữ lên cạnh trên của chart
+         double maxPrice = ChartGetDouble(0, CHART_PRICE_MAX);
+         ObjectMove(0, labelName, 0, futureTime, maxPrice); 
+         ObjectSetString(0, labelName, OBJPROP_TEXT, IntegerToString(targetBars));
+         ObjectSetInteger(0, labelName, OBJPROP_COLOR, (isHigh) ? clrDodgerBlue : clrHotPink);
+         ObjectSetInteger(0, labelName, OBJPROP_FONTSIZE, 9);
+      }
+   }
+   ChartRedraw();
+}
+
+void RemoveForecasts() {
+   ObjectsDeleteAll(0, "chronos_fc_");
+   ObjectsDeleteAll(0, "chronos_lbl_");
 }
 
 //+------------------------------------------------------------------+

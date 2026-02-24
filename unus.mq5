@@ -27,7 +27,8 @@ input int    InpKijun        = 26;      // Kijun-sen Period
 input int    InpSenkou       = 52;      // Senkou Span B Period
 input ENUM_SIGNAL_MODE InpSignalMode = SIG_ALL; // Chế độ tín hiệu
 input int    InpMinStrength  = 3;       // Sức mạnh tín hiệu tối thiểu (1-5)
-input bool   InpUseTrendD1   = true;    // Lọc xu hướng D1 (Ichimoku)
+input ENUM_TIMEFRAMES InpHTFTimeframe = PERIOD_D1; // Khung HTF (Trend & Pullback)
+input bool   InpUseHTFTrend  = true;    // Lọc xu hướng theo khung HTF
 input double InpMinKumoWidth = 0;       // Độ dày Kumo tối thiểu % (0-100, 0=Tắt)
 
 input group "=== QUẢN LÝ VỐN ==="
@@ -88,13 +89,19 @@ input string InpNT1Start     = "17:00"; // Nghỉ 1: Bắt đầu
 input string InpNT1End       = "21:00"; // Nghỉ 1: Kết thúc
 input int    InpServerGMTOffset = 2;    // Múi giờ Server
 
+input group "=== HIGH PROBABILITY PULLBACK (HTF) ==="
+input bool   InpUseHTFPullback = true;  // Lọc Pullback Khung Lớn (HTF)
+input double InpHTFLotMultiplier = 1.5; // Hệ số Lot (x lần) khi xác suất cao
+input int    InpHTFPullbackZone = 20;   // Biên độ chạm đường HTF (pips)
+
+
 input int    InpMagic        = 226100;  // Magic Number
 
 //+------------------------------------------------------------------+
 //| BIẾN TOÀN CỤC                                                   |
 //+------------------------------------------------------------------+
 CTrade Trade;
-int    hIchi, hIchiD1, hATR;
+int    hIchi, hIchiHTF, hATR;
 bool   g_stoppedToday = false;
 int    g_lastDay = -1;
 int    g_lastDealCount = 0;
@@ -108,10 +115,10 @@ int OnInit() {
    Trade.SetExpertMagicNumber(InpMagic);
    
    hIchi   = iIchimoku(_Symbol, InpTimeframe, InpTenkan, InpKijun, InpSenkou);
-   hIchiD1 = iIchimoku(_Symbol, PERIOD_D1, InpTenkan, InpKijun, InpSenkou);
+   hIchiHTF = iIchimoku(_Symbol, InpHTFTimeframe, InpTenkan, InpKijun, InpSenkou);
    hATR    = iATR(_Symbol, InpTimeframe, InpATRPeriod);
    
-   if(hIchi==INVALID_HANDLE || hIchiD1==INVALID_HANDLE || hATR==INVALID_HANDLE) {
+   if(hIchi==INVALID_HANDLE || hIchiHTF==INVALID_HANDLE || hATR==INVALID_HANDLE) {
       Print("Unus: Lỗi khởi tạo indicator!"); return INIT_FAILED;
    }
    
@@ -125,7 +132,7 @@ int OnInit() {
 }
 
 void OnDeinit(const int reason) {
-   IndicatorRelease(hIchi); IndicatorRelease(hIchiD1); IndicatorRelease(hATR);
+   IndicatorRelease(hIchi); IndicatorRelease(hIchiHTF); IndicatorRelease(hATR);
    ObjectsDeleteAll(0, "UN_");
    Print("Unus: Thoát. Reason=", reason);
 }
@@ -244,16 +251,47 @@ bool IsRange() {
 }
 
 //+------------------------------------------------------------------+
-//| D1 TREND FILTER                                                  |
+//| HTF TREND FILTER                                                 |
 //+------------------------------------------------------------------+
-int GetD1Trend() {
-   if(!InpUseTrendD1) return 0;
+int GetHTFTrend() {
+   if(!InpUseHTFTrend) return 0;
    double t0,k0,sa0,sb0,ch0;
-   if(!GetIchi(hIchiD1,0,t0,k0,sa0,sb0,ch0)) return 0;
-   double price = iClose(_Symbol, PERIOD_D1, 0);
+   if(!GetIchi(hIchiHTF,0,t0,k0,sa0,sb0,ch0)) return 0;
+   double price = iClose(_Symbol, InpHTFTimeframe, 0);
    if(price>MathMax(sa0,sb0) && t0>k0) return 1;
    if(price<MathMin(sa0,sb0) && t0<k0) return -1;
    return 0;
+}
+
+//+------------------------------------------------------------------+
+//| HIGH PROBABILITY PULLBACK (HTF)                                  |
+//+------------------------------------------------------------------+
+bool CheckHighProbPullback(int sig) {
+   if(!InpUseHTFPullback) return false;
+   double t0,k0,sa0,sb0,ch0;
+   // Lấy giá trị Ichimoku ở khung HTF
+   if(!GetIchi(hIchiHTF,0,t0,k0,sa0,sb0,ch0)) return false;
+   
+   double price = iClose(_Symbol, InpTimeframe, 0); // Giá hiện tại ở khung thực thi
+   double tol = InpHTFPullbackZone * g_pt * g_p2p;  // Đổi pips ra giá
+   
+   // Kiểm tra giá khung nhỏ có đang chạm Tenkan, Kijun hoặc Mây của D1 không
+   bool nearTenkan = MathAbs(price - t0) <= tol;
+   bool nearKijun  = MathAbs(price - k0) <= tol;
+   bool nearSa     = MathAbs(price - sa0) <= tol;
+   bool nearSb     = MathAbs(price - sb0) <= tol;
+   bool inKumo     = (price <= MathMax(sa0, sb0) && price >= MathMin(sa0, sb0));
+   
+   if(sig == 1) {
+      // Setup BUY: Kumo HTF đang là mây Tăng và giá lùi về chạm hỗ trợ
+      if(sa0 > sb0 && (nearTenkan || nearKijun || nearSa || nearSb || inKumo)) return true;
+   }
+   else if(sig == -1) {
+      // Setup SELL: Kumo HTF đang là mây Giảm và giá hồi lên chạm kháng cự
+      if(sa0 < sb0 && (nearTenkan || nearKijun || nearSa || nearSb || inKumo)) return true;
+   }
+   
+   return false;
 }
 
 //+------------------------------------------------------------------+
@@ -261,23 +299,23 @@ int GetD1Trend() {
 //+------------------------------------------------------------------+
 int GetSignal() {
    if(IsRange()) return 0;
-   int d1=GetD1Trend(), sig=0;
+   int htf=GetHTFTrend(), sig=0;
    
    if(InpSignalMode==SIG_SANYAKU || InpSignalMode==SIG_ALL) {
       sig=CheckSanyaku();
-      if(sig!=0 && CalcStrength(sig>0)>=InpMinStrength && (d1==0||d1==sig)) return sig;
+      if(sig!=0 && CalcStrength(sig>0)>=InpMinStrength && (htf==0||htf==sig)) return sig;
    }
    if(InpSignalMode==SIG_GOLD_CROSS || InpSignalMode==SIG_ALL) {
       sig=CheckCross();
-      if(sig!=0 && CalcStrength(sig>0)>=InpMinStrength && (d1==0||d1==sig)) return sig;
+      if(sig!=0 && CalcStrength(sig>0)>=InpMinStrength && (htf==0||htf==sig)) return sig;
    }
    if(InpSignalMode==SIG_PULLBACK || InpSignalMode==SIG_ALL) {
       sig=CheckPullback();
-      if(sig!=0 && CalcStrength(sig>0)>=InpMinStrength && (d1==0||d1==sig)) return sig;
+      if(sig!=0 && CalcStrength(sig>0)>=InpMinStrength && (htf==0||htf==sig)) return sig;
    }
    if(InpSignalMode==SIG_ALL) {
       sig=CheckKumoBreak();
-      if(sig!=0 && CalcStrength(sig>0)>=MathMax(InpMinStrength,3) && (d1==0||d1==sig)) return sig;
+      if(sig!=0 && CalcStrength(sig>0)>=MathMax(InpMinStrength,3) && (htf==0||htf==sig)) return sig;
    }
    return 0;
 }
@@ -345,25 +383,35 @@ void OnTick() {
       int sig = GetSignal();
       if(sig==0) { UpdatePanel(0,bCnt,sCnt,0); return; }
       int str = CalcStrength(sig>0);
+      
+      // Xử lý Lot size tăng nếu là điểm Pullback xác suất cao
+      double lotSize = InpBaseVol;
+      bool isHighProb = CheckHighProbPullback(sig);
+      if(isHighProb) {
+         lotSize = CheckVolume(InpBaseVol * InpHTFLotMultiplier);
+      }
+      
       double tpDist = (InpFirstTP>0) ? InpFirstTP*g_p2p*g_pt : 0;
       if(sig==1) {
          double sl = (slDist>0) ? ask-slDist : 0;
          double tp = (tpDist>0) ? ask+tpDist : 0;
-         Trade.Buy(InpBaseVol, _Symbol, 0, sl, tp, "Unus BUY S"+IntegerToString(str));
-         Print("Unus: BUY Strength=", str, " SL=", sl, " TP=", tp);
+         Trade.Buy(lotSize, _Symbol, 0, sl, tp, "Unus BUY S"+IntegerToString(str));
+         if(isHighProb) Print("Unus: 🚀 HIGH PROB PULLBACK BUY! Size boosted to ", lotSize, " (Base: ", InpBaseVol, ")");
+         else Print("Unus: BUY Strength=", str, " SL=", sl, " TP=", tp);
       }
       else if(sig==-1) {
          double sl = (slDist>0) ? bid+slDist : 0;
          double tp = (tpDist>0) ? bid-tpDist : 0;
-         Trade.Sell(InpBaseVol, _Symbol, 0, sl, tp, "Unus SELL S"+IntegerToString(str));
-         Print("Unus: SELL Strength=", str, " SL=", sl, " TP=", tp);
+         Trade.Sell(lotSize, _Symbol, 0, sl, tp, "Unus SELL S"+IntegerToString(str));
+         if(isHighProb) Print("Unus: 🚀 HIGH PROB PULLBACK SELL! Size boosted to ", lotSize, " (Base: ", InpBaseVol, ")");
+         else Print("Unus: SELL Strength=", str, " SL=", sl, " TP=", tp);
       }
    }
    
    // Update panel
    double pnl=0;
    for(int i=PositionsTotal()-1;i>=0;i--) { ulong tk=PositionGetTicket(i); if(PositionGetString(POSITION_SYMBOL)==_Symbol&&PositionGetInteger(POSITION_MAGIC)==InpMagic) pnl+=PositionGetDouble(POSITION_PROFIT); }
-   UpdatePanel(GetD1Trend(), bCnt, sCnt, pnl);
+   UpdatePanel(GetHTFTrend(), bCnt, sCnt, pnl);
 }
 
 //+------------------------------------------------------------------+

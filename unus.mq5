@@ -30,6 +30,8 @@ input int    InpMinStrength  = 3;       // Sức mạnh tín hiệu tối thiể
 input ENUM_TIMEFRAMES InpHTFTimeframe = PERIOD_D1; // Khung HTF (Trend & Pullback)
 input bool   InpUseHTFTrend  = true;    // Lọc xu hướng theo khung HTF
 input double InpMinKumoWidth = 0;       // Độ dày Kumo tối thiểu % (0-100, 0=Tắt)
+input int    InpMaxTenkanDist = 30;     // (NEW) Bỏ qua tín hiệu nếu giá cách Tenkan > N pips (0=Tắt)
+input int    InpRangePeriods  = 5;      // (NEW) Số nến Kijun đi ngang để xác định Range
 
 input group "=== QUẢN LÝ VỐN ==="
 input ENUM_LOT_MODE InpLotMode = LOT_FIXED; // Chế độ Lot
@@ -192,19 +194,24 @@ int CheckSanyaku() {
 }
 
 //+------------------------------------------------------------------+
-//| GOLD / DEAD CROSS                                                |
+//| GOLD / DEAD CROSS (Authentic Cross Filter)                       |
 //+------------------------------------------------------------------+
 int CheckCross() {
    double t0,k0,sa0,sb0,ch0, t1,k1,sa1,sb1,ch1;
    if(!GetIchi(hIchi,0,t0,k0,sa0,sb0,ch0)) return 0;
    if(!GetIchi(hIchi,1,t1,k1,sa1,sb1,ch1)) return 0;
-   if(t0>k0 && t1<=k1) return 1;   // Gold Cross
-   if(t0<k0 && t1>=k1) return -1;  // Dead Cross
+   
+   // Authentic Gold Cross: Kijun sen phải dốc lên hoặc đi ngang
+   if(t0>k0 && t1<=k1 && k0>=k1) return 1;   
+   
+   // Authentic Dead Cross: Kijun sen phải dốc xuống hoặc đi ngang
+   if(t0<k0 && t1>=k1 && k0<=k1) return -1;  
+   
    return 0;
 }
 
 //+------------------------------------------------------------------+
-//| PULLBACK                                                         |
+//| PULLBACK (Tenkan, Kijun, Senkou 1, Senkou 2)                     |
 //+------------------------------------------------------------------+
 int CheckPullback() {
    double t0,k0,sa0,sb0,ch0;
@@ -213,13 +220,18 @@ int CheckPullback() {
    double price1 = iClose(_Symbol, InpTimeframe, 1);
    double tol = 20*g_pt;
    double kumoTop=MathMax(sa0,sb0), kumoBot=MathMin(sa0,sb0);
+   
    if(price>kumoTop && t0>k0) {
-      if(price1<=t0+tol && price>t0) return 1;
-      if(price1<=k0+tol && price>k0 && price1>kumoTop) return 1;
+      if(price1<=t0+tol && price>t0) return 1; // Pullback Tenkan
+      if(price1<=k0+tol && price>k0 && price1>kumoTop) return 1; // Pullback Kijun
+      if(price1<=sa0+tol && price>sa0 && sa0>sb0) return 1; // Pullback Senkou 1 (Uptrend)
+      if(price1<=sb0+tol && price>sb0) return 1; // Pullback Senkou 2 (Phòng tuyến cuối)
    }
    if(price<kumoBot && t0<k0) {
-      if(price1>=t0-tol && price<t0) return -1;
-      if(price1>=k0-tol && price<k0 && price1<kumoBot) return -1;
+      if(price1>=t0-tol && price<t0) return -1; // Pullback Tenkan
+      if(price1>=k0-tol && price<k0 && price1<kumoBot) return -1; // Pullback Kijun
+      if(price1>=sa0-tol && price<sa0 && sa0<sb0) return -1; // Pullback Senkou 1 (Downtrend)
+      if(price1>=sb0-tol && price<sb0) return -1; // Pullback Senkou 2 (Phòng tuyến cuối)
    }
    return 0;
 }
@@ -238,16 +250,24 @@ int CheckKumoBreak() {
 }
 
 //+------------------------------------------------------------------+
-//| RANGE MARKET DETECTION                                           |
+//| RANGE MARKET DETECTION (Advanced Kijun Flatness)                 |
 //+------------------------------------------------------------------+
 bool IsRange() {
-   double t0,k0,sa0,sb0,ch0, t1,k1,sa1,sb1,ch1, t2,k2,sa2,sb2,ch2;
-   if(!GetIchi(hIchi,0,t0,k0,sa0,sb0,ch0)) return true;
-   if(!GetIchi(hIchi,1,t1,k1,sa1,sb1,ch1)) return true;
-   if(!GetIchi(hIchi,2,t2,k2,sa2,sb2,ch2)) return true;
-   bool flat = MathAbs(k0-k1)<5*g_pt && MathAbs(k1-k2)<5*g_pt;
-   bool xback = (t0>k0 && t2<k2) || (t0<k0 && t2>k2);
-   return (flat && xback);
+   // Kiểm tra Kijun đi ngang trong N nến
+   int flatCount = 0;
+   double k0, t, sa, sb, ch;
+   if(!GetIchi(hIchi, 0, t, k0, sa, sb, ch)) return true;
+   
+   for(int i=1; i<=InpRangePeriods; i++) {
+      double ti, ki, sai, sbi, chi;
+      if(!GetIchi(hIchi, i, ti, ki, sai, sbi, chi)) continue;
+      if(MathAbs(k0 - ki) < 5 * g_pt) flatCount++;
+   }
+   
+   // Nếu Kijun đi ngang trong hầu hết số nến kiểm tra -> Range
+   if(flatCount >= InpRangePeriods - 1) return true;
+   
+   return false;
 }
 
 //+------------------------------------------------------------------+
@@ -321,6 +341,18 @@ int GetSignal() {
 }
 
 //+------------------------------------------------------------------+
+//| OVEREXTENDED PRICE FILTER                                        |
+//+------------------------------------------------------------------+
+bool IsOverextended() {
+   if(InpMaxTenkanDist <= 0) return false;
+   double t0,k0,sa0,sb0,ch0;
+   if(!GetIchi(hIchi,0,t0,k0,sa0,sb0,ch0)) return false;
+   double price = iClose(_Symbol, InpTimeframe, 0);
+   double distPips = MathAbs(price - t0) / (g_pt * g_p2p);
+   return (distPips > InpMaxTenkanDist);
+}
+
+//+------------------------------------------------------------------+
 //| OnTick - Xử lý chính                                             |
 //+------------------------------------------------------------------+
 void OnTick() {
@@ -380,6 +412,8 @@ void OnTick() {
    
    // First entry
    if(bCnt==0 && sCnt==0) {
+      if(IsOverextended()) return; // Bỏ qua nếu giá đi quá xa Tenkan
+      
       int sig = GetSignal();
       if(sig==0) { UpdatePanel(0,bCnt,sCnt,0); return; }
       int str = CalcStrength(sig>0);

@@ -1,0 +1,203 @@
+# Ghi chú từ sách VN_Ichimoku Basic Master book 2
+
+## Tổng quan
+
+- **Tựa sách:** Master the Art of Ichimoku Kinko Hyo (Ichimoku Hiểu Biết)
+- **Tác giả:** Forex Kei (2021)
+
+## Mục lục
+
+- **Chương 1:** Lịch sử và 5 dòng của Ichimoku Kinko Hyo
+- **Chương 2:** Nắm vững phép tính 5 dòng và khái niệm về dòng Han-ne
+- **Chương 3:** Sanyaku Kouten (Sanyaku Gyakuten)
+- **Chương 4:** Làm chủ các dòng Han-ne
+- **Chương 5:** Làm chủ Tenkan sen
+- **Chương 6:** Làm chủ Kijun sen
+- **Chương 7:** Làm chủ Thập tự vàng và Thập tự chết của Kinko Hyo
+- **Chương 8:** Thập tự vàng và Thập tự chết của Kinko Hyo trong vùng Phạm vi (Range)
+- **Chương 9:** Tinh hoa của Thập tự vàng và Thập tự chết
+- **Chương 10:** Làm chủ Senko span 2 và ý nghĩa cần chuyển tiếp
+- **Chương 11:** Làm chủ Senko span 1
+- **Chương 12:** Bản chất của Kumo (Mây)
+- **Chương 13:** Bản chất của Kumo Twist (Xoắn mây)
+- **Chương 14:** Bản chất của Chikou span
+- **Chương 15:** Dự báo thị trường theo khoảng thời gian Chikou và Công dụng tối ưu của Ichimoku Kinko Hyo
+
+## Chi tiết nội dung
+
+### Chương 1: Lịch sử và 5 dòng của Ichimoku Kinko Hyo
+
+- **Lịch sử:** Được nghĩ ra vào đầu thời kỳ Showa (1930) bởi Ichimoku Sanjin (Goichi Hosoda). Đây là một hệ thống phân tích rất có chiều sâu.
+
+### Chương 3: Sanyaku Kouten (Sanyaku Gyakuten)
+
+- **Tín hiệu Mua (Sanyaku Kouten - Ba tín hiệu chữ thập vàng):**
+  1. _Kouten của Kinko Hyo:_ Tenkan sen cắt lên Kijun sen (Tín hiệu mua sớm).
+  2. _Kouten của Chikou span:_ Chikou span cắt nến đi lên (Tín hiệu mua hơi sớm).
+  3. _Sanyaku Kouten (Đột phá Kumo):_ Giá cắt Kumo đi lên (Tín hiệu mua muộn nhưng chắc chắn nhất).
+- **Tín hiệu Bán (Sanyaku Gyakuten - Ba tín hiệu chữ thập chết):**
+  1. _Gyakuten của Kinko Hyo:_ Tenkan sen cắt xuống Kijun sen (Tín hiệu bán sớm).
+  2. _Gyakuten của Chikou span:_ Chikou span cắt nến đi xuống (Tín hiệu bán hơi sớm).
+  3. _Sanyaku Jnanakuten (Đột phá Kumo):_ Giá cắt Kumo đi xuống (Tín hiệu bán muộn).
+- **Lưu ý quan trọng:**
+  - Các tín hiệu Sanyaku Kouten và Gyakuten **KHÔNG hoạt động tốt trong vùng phạm vi (Range)**. Khi thị trường đi ngang, các đường và giá cuốn vào nhau, tín hiệu giả rất nhiều.
+  - Khi có xu hướng ổn định, 5 đường sẽ cách xa nhau và di chuyển song song.
+
+### Chương 4: Làm chủ các dòng Han-ne
+
+- **Khái niệm Han-ne:** Trung bình cộng của giá cao nhất và giá thấp nhất trong N ngày.
+  - Tenkan là Han-ne 9 nến.
+  - Kijun là Han-ne 26 nến.
+  - Senkou Span 2 là Han-ne 52 nến.
+- **Kijun sen:** Ví dụ giá chạy từ 200 Yên lên 300 Yên trong 26 ngày qua, Kijun = 250 Yên. Đây là sự cân bằng trung hạn. Mức này có thể đóng vai trò là "điểm hồi lại" (Han-ne push back) cho một xu hướng tiếp diễn.
+- **Phân loại cán cân:**
+  - _Ngắn hạn:_ Tenkan sen (Han-ne 9 nến). Giá > Tenkan là mua mạnh ngắn hạn.
+  - _Trung hạn:_ Kijun sen (Han-ne 26 nến). Giá > Kijun là mua mạnh trung hạn.
+  - _Dài hạn:_ Senko Span 2 (Han-ne 52 nến).
+  - _Sanyaku Kouten_ thực chất là giá lần lượt phá vỡ Tenkan, Kijun, Senko Span 2. Báo hiệu sức mua lấn át đối phương từ vi mô (ngắn hạn) rồi lan dần sang vĩ mô (dài hạn).
+
+### Chương 5: Làm chủ Tenkan sen
+
+- **Công thức:** `(Highest High 9 nến + Lowest Low 9 nến) / 2`.
+- **Vai trò kép của các dòng Han-ne (chìa khóa cốt lõi, áp dụng cho Tenkan, Kijun, Senkou 1 và 2 - KHÔNG áp dụng Chikou):**
+  1. **Khi CÓ xu hướng (Trend):** Đóng vai trò là **Điểm giới hạn cho nhịp hồi (Pullback/Push back limit)**. Ví dụ trong xu hướng tăng, Tenkan sen là bệ đỡ đầu tiên để giá đập vào rồi nảy lên tiếp.
+- **Các cấp độ hồi (Pullback) theo 4 đường (Tenkan, Kijun, Senko 1, Senko 2):** Mỗi đường đóng vai trò như một lớp bệ đỡ / kháng cự.
+  1. **Rất mạnh:** Pullback kết thúc ngay tại Tenkan sen (hoặc chưa chạm tới). Xu hướng rất ổn định và dốc.
+  2. **Mạnh:** Pullback xuyên qua Tenkan và nảy lên/bật xuống tại Kijun sen. Đây là mức điều chỉnh tiêu chuẩn.
+  3. **Hơi mạnh:** Pullback xuyên qua Tenkan và Kijun, đập vào Senko Span 1. Lúc này lực ngược chiều đã chiếm ưu thế ngắn và trung hạn, cần cẩn thận vì độ ổn định đang giảm.
+  4. **Yếu:** Pullback lùi sâu về tận Senko Span 2. Xu hướng đang ở giới hạn cuối cùng. Sắp đảo chiều nếu giá xuyên qua Senko Span 2.
+- **Giá quá xa Tenkan sen (Overextended):** Khi giá đi quá xa khỏi Tenkan sen, thị trường ở trạng thái "quá nóng" (quá mua/quá bán). Giá sẽ có xu hướng bị hút ngược trở lại về Tenkan sen để cân bằng/tích lũy. Điểm giao dịch cực kỳ an toàn là lúc xu hướng bám sát Tenkan sen.
+
+### Chương 6: Làm chủ Kijun sen
+
+- **Khái niệm:** Kijun sen là đường Cơ sở (Baseline), đại diện cho mức thị trường trung hạn.
+- **Công thức:** `(Highest High 26 nến + Lowest Low 26 nến) / 2`.
+- **Đặc điểm:** Thay đổi hướng chậm hơn Tenkan; Thường phẳng (đi ngang) nhiều hơn Tenkan do bao phủ 26 nến.
+- **Mối quan hệ với xu hướng:**
+  - Vị trí: Trong uptrend, Kijun ở dưới Tenkan; trong downtrend, Kijun ở trên Tenkan.
+  - Mức cân bằng: Kijun sen chính là điểm giao thoa cân bằng lực mua/bán của 26 ngày qua.
+  - Sự đảo chiều: Khi giá phá vỡ Kijun sen, điều đó thường bao hàm ý nghĩa xu hướng trung hạn hiện tại (tăng/giảm) có nhiều khả năng đã kết thúc.
+  - Sức mạnh: Giá > Kijun (mua mạnh trung hạn), Giá < Kijun (bán mạnh trung hạn).
+- **Thị trường Đi ngang (Consolidation/Range):**
+  - Khi Kijun sen đi ngang (phẳng), điều đó có nghĩa là giá Cao nhất và Thấp nhất trong 26 ngày không thay đổi. Thị trường đang trong giai đoạn đi ngang, tích lũy. Kijun sen chính là Market Level (trung tâm lực hút).
+  - Khi Kijun sen bắt đầu gãy góc và hướng lên/xuống sau một thời gian đi ngang, đó là tín hiệu xác nhận một High hoặc Low mới được hình thành, đánh dấu sự kết thúc của giai đoạn đi ngang để bắt đầu xu hướng mới.
+
+### Chương 7: Chữ thập Vàng và Chữ thập Chết (Kinko Hyo Crosses)
+
+- **Tín hiệu quan trọng nhất:** Ban đầu "Kinko Hyo" chỉ ám chỉ Tenkan và Kijun. Việc giao cắt giữa 2 đường này là tín hiệu cốt lõi và quan trọng nhất của hệ thống (hơn cả Sanyaku Kouten).
+- **Gold Cross (Chữ thập vàng):** Tenkan sen cắt lên trên Kijun sen -> Tín hiệu MUA.
+- **Dead Cross (Chữ thập chết):** Tenkan sen cắt xuống dưới Kijun sen -> Tín hiệu BÁN.
+- Khác với Moving Average (MA), vì Tenkan/Kijun có tính chất "phẳng" (flat) nên 2 đường có thể chồng lên nhau, đi cùng nhau 1 đoạn rồi mới cắt dứt khoát.
+- **Xác nhận Xu hướng:** Trong một xu hướng mạnh và ổn định, các đường Ichimoku có xu hướng đi song song với nhau. Khi chúng không còn song song, xung lượng đang giảm dần.
+- **Fake Cross (Tín hiệu giả trong vùng Range):** Đây là kiến thức quan trọng nhất để lọc nhiễu.
+  - Khi thị trường đi ngang (Consolidation/Range), Tenkan sen và Kijun sen sẽ cắt lên cắt xuống liên tục. Tất cả các tín hiệu cross lúc này đều là **VÔ DỤNG (Hàng giả)** và sẽ gây thua lỗ nếu áp dụng máy móc.
+  - Nhận diện vùng đi ngang: Khu vực mà CẢ 5 ĐƯỜNG Ichimoku (Tenkan, Kijun, Chiko, Senko 1, Senko 2) đan xen vào nhau, nằm sát nhau và giá đi xuyên qua chúng liên tục. Tuyệt đối không giao dịch theo giao cắt ở vùng này.
+- **Điều kiện cho một Cross CHUẨN (Authentic Cross):**
+  - **Gold Cross:** Kijun sen **PHẢI** đang dốc lên hoặc ít nhất là đi ngang. **KHÔNG ĐƯỢC** giao dịch Gold Cross nếu Kijun sen đang dốc xuống.
+  - **Dead Cross:** Kijun sen **PHẢI** đang dốc xuống hoặc ít nhất là đi ngang. **KHÔNG ĐƯỢC** giao dịch Dead Cross nếu Kijun sen đang dốc lên.
+- **Dấu hiệu Cảnh báo Fake Cross sau khi vào lệnh (Post-cross check):**
+  - Sau khi cross, Tenkan và Kijun nên di chuyển cùng hướng (lên cho Gold, xuống cho Dead) và duy trì khoảng cách.
+- Nếu Giá và Tenkan sen quay đầu đột ngột và cắt ngược lại Kijun sen -> Xác nhận Fake Cross, cần thoát vị thế ngay lập tức.
+
+### Chương 8: Chữ thập vàng & Chết trong vùng Phạm vi (Range)
+
+- Khi thị trường mất xu hướng, các đường Tenkan, Kijun, Senko 1, Senko 2 có xu hướng đi ngang (phẳng/flat) và xoắn lại/hội tụ với nhau. Đường ngang chính là tâm lực hút (trung bình giá).
+- **Phân tích Chu kỳ qua độ phẳng:**
+  - Chu kỳ (Cycle) được định nghĩa là khoảng thời gian từ Đỉnh này đến Đỉnh tiếp theo, hoặc Rìa đáy này đến Rìa đáy tiếp theo.
+  - Nếu Tenkan sen đi ngang -> Chu kỳ thị trường hiện tại đang $\le$ 9 nến.
+  - Nếu Kijun sen đi ngang -> Chu kỳ dao động của thị trường đang $\le$ 26 nến.
+  - Nếu Senkou span 2 đi ngang -> Chu kỳ dao động đang $\le$ 52 nến.
+  - => Độ phẳng của các đường giúp ta đo lường chu kỳ dao động ngang của thị trường.
+- **Giao dịch Đột phá Phạm vi (Range Breakout):**
+  - Trong vùng Range, đường đi ngang (thường là Kijun) đóng vai trò là "Trung tâm lực hút" (cân bằng). Giá sẽ nảy lên nảy xuống quanh đường này.
+  - Điểm giao cắt (Cross) ĐẦU TIÊN mà sau đó Tenkan sen dứt khoát không quay lại Kijun sen nữa mà kéo giãn khoảng cách, cộng thêm việc Kijun sen bẻ ngoặt (dốc lên/xuống) chính là tín hiệu xác nhận Đột phá khỏi vùng Range. Đây là một authentic cross cực kỳ giá trị.
+
+### Chương 9: Bản chất của Thập tự Vàng và Thập tự Chết (Kinko Hyo Crosses)
+
+- Về công thức: Điểm giao cắt xảy ra khi `(Đỉnh cao nhất 9 nến + Đáy thấp nhất 9 nến)/2` giao với `(Đỉnh cao nhất 26 nến + Đáy thấp nhất 26 nến)/2`.
+- Bản chất: Giao cắt thể hiện sự dịch chuyển động lượng từ ngắn hạn sang trung hạn.
+- Trong một xu hướng tăng giá lành mạnh, Tenkan sen LUÔN nằm xấp xỉ Mốc 1/3 (hoặc 1/4) của đợt tăng. Kijun sen nằm ở mức Han-ne (1/2) của đợt tăng. Do đó Tenkan luôn lớn hơn Kijun.
+- Lý thuyết Boomerang: Giá nảy lên từ Kijun sen (1/2 pullback) thể hiện xu hướng vẫn còn mạnh. Nếu phá vỡ Kijun sen, cấu trúc xu hướng bị lung lay và có thể dẫn tới sự giao cắt (Dead cross).
+- **Phân loại Vùng Phạm vi (Range) dẫn đến Fake Cross:**
+  1. Loại 1: Giá giảm và bị kẹt lại, chưa đủ để phá đỉnh 26 nến cũ nhưng cũng không tạo đáy mới. (Mô hình Hộp)
+  2. Loại 2: Cắt sau một xu hướng giảm siêu mạnh và dài. Sự phục hồi nhỏ tạo ra tín hiệu cắt giả (Dead Cat Bounce). Kijun sen đi ngang và hướng xuống, Tenkan sen đi lên cắt Kijun tạo Golden Cross tồi tệ.
+  3. Loại 3: Golden Cross xảy ra ở đỉnh của một dao động (do độ trễ của trung bình 26 nến và 9 nến). Mua sau khi mua quá mức.
+  4. Loại 4: Giao cắt do thị trường cực kỳ biến động, lên xuống không xu hướng.
+
+### Chương 10: Senkou Span 2 (Đường trễ 2)
+
+- Công thức: `(Đỉnh cao nhất 52 phiên + Đáy thấp nhất 52 phiên) / 2`, dịch chuyển về phía trước (tương lai) 26 phiên.
+- Ý nghĩa: Đại diện cho mức cân bằng dài hạn (Han-ne dài hạn). Nó cho thấy ngưỡng hỗ trợ/kháng cự dài hạn và hướng đi của xu hướng dài hạn.
+- Đóng vai trò là giới hạn thoái lui 1/2 (50%) của dải xu hướng dài hạn 52 nến. Nếu giá phá vỡ giới hạn này, xu hướng dài hạn bị phá vỡ hoàn toàn.
+
+### Chương 11: Senkou Span 1 (Đường trễ 1)
+
+- Công thức: `(Tenkan sen + Kijun sen) / 2`, dịch chuyển về phía trước 26 phiên.
+- Ý nghĩa: Đại diện cho mức cân bằng ngắn-trung hạn (Han-ne của ngắn và trung hạn).
+- Đóng vai trò là giới hạn thoái lui khoảng 1/3 (~33%) của dải xu hướng dài hạn.
+- Nếu đà (momentum) của xu hướng mạnh, giá thường bật lại từ giới hạn 1/3 này (Senkou Span 1).
+- Việc dịch chuyển 26 nến về tương lai giúp nhà giao dịch so sánh sức mạnh của thị trường ngắn-trung hạn (Senkou Span 1) so với sức mạnh thị trường dài hạn (Senkou Span 2) tại cùng một thời điểm tương lai để dự báo xu hướng.
+
+### Chương 12: Bản chất của Kumo (Đám mây)
+
+- Kumo (Đám mây) là vùng nằm giữa Senkou Span 1 và Senkou Span 2. Thuật ngữ này không có trong sách gốc của Goichi Hosoda nhưng được sử dụng phổ biến.
+- Đám mây tượng trưng cho sự cân bằng quyền lực giữa người mua và người bán ở các khung thời gian ngắn, trung và dài hạn.
+- **Tại sao giá bật lại ở rìa mây?** Rìa đầu tiên giá chạm thường là Senkou Span 1, là giới hạn thoái lui 1/3. Nếu đà trung hạn vẫn mạnh, giá sẽ bật lại.
+- **Tại sao giá đi ngang trong mây?** Khi giá phá vỡ Senkou Span 1 và đi vào trong mây, nó thể hiện đà ngắn-trung hạn đã suy yếu, nhưng đà dài hạn (Senkou Span 2 - giới hạn thoái lui 1/2) vẫn đang giữ. Cuộc chiến giữa hai bên tạo ra một vùng hợp nhất (consolidation) trong Kumo.
+- **Tại sao phá vỡ mây tạo đà mạnh?** Việc phá vỡ hoàn toàn mây (đặc biệt là phá vỡ Senkou Span 2) có nghĩa là phòng tuyến cuối cùng của xu hướng dài hạn đã sụp đổ, thu hút một lượng lớn lực mua/bán theo hướng đột phá, tạo ra đà mạnh (momentum).
+
+### Chương 13: Bản chất của Kumo Twist (Xoắn Mây)
+
+- Xoắn mây (Kumo Twist) còn gọi là Ngày thay đổi (Henka-bi), báo hiệu tiềm năng đảo chiều xu hướng hoặc một điểm giá trị về mặt thời gian.
+- **Xác định Range vs Trend:**
+  - **Range:** Kijun sen đi ngang, các đường co cụm lại gần nhau, Chiko span cắt vào các đường khác hoặc giá.
+  - **Trend:** Các đường tách xa nhau một cách rõ rệt. Thứ tự sắp xếp trong Uptrend: Giá > Tenkan > Kijun > SS1 > SS2. Thứ tự trong Downtrend: Giá < Tenkan < Kijun < SS1 < SS2.
+- **Độ dày của mây và Sức cản:**
+  - **Mây dày:** Kháng cự/Hỗ trợ mạnh. Xảy ra khi SS1 và SS2 tách xa nhau, hệ quả của một đợt xu hướng rõ rệt ở 26 nến trước đó.
+  - **Mây mỏng:** Kháng cự/Hỗ trợ yếu, dễ bị phá vỡ. Mây mỏng phản ánh việc 26 nến trước đó thị trường đi ngang (không có xu hướng rõ ràng), do đó không tích lũy đủ sức mạnh hỗ trợ/kháng cự từ quá khứ.
+  - Trong thị trường sideway kéo dài, giá có thể dễ dàng xuyên qua mây liên tục qua lại, và lúc này Kumo mất đi tính chất vùng cản lý tưởng. Kumo chỉ là bệ đỡ tốt sau khi đã có một giai đoạn xu hướng rõ ràng ở quá khứ.
+
+- **Bản chất của việc Tenkan sen và Kijun sen trùng nhau (Đi ngang):**
+  - Nghĩa là Trung bình giá 9 nến gần nhất BẰNG CHÍNH XÁC Trung bình giá 26 nến. (Chỉ xảy ra khi Cao/Thấp 9 nến bị bao trùm bởi Cao/Thấp 26 nến, hoặc trùng khớp hoàn toàn trong Range).
+- **Lý thuyết đằng sau Trend (Tính chất Boomerrang):**
+  - Trong xu hướng TĂNG: Vì giá liên tục phá đỉnh, nên Đỉnh (9) thường bằng Đỉnh (26). Nhưng Đáy (9) chắc chắn cao hơn Đáy (26). Do đó (Đỉnh+Đáy 9)/2 > (Đỉnh+Đáy 26)/2, tức là **Tenkan > Kijun**.
+  - Gold Cross (Boomerang): Thị trường chạm đáy thấp nhất 9 nến trước, sau đó giá tăng mạnh vượt qua mức trung bình của 26 ngày (Han-ne 26), kéo Tenkan cắt lên Kijun.
+  - Dead Cross (Boomerang): Thị trường chạm đỉnh cao nhất 9 nến trước, sau đó giảm mạnh cắt xuống mức trung bình 26 ngày, kéo Tenkan cắt xuống Kijun.
+- **4 Mô hình Phạm vi (Range) phá vỡ tín hiệu (Tạo Fake Cross):**
+  - Khi thị trường không có xu hướng "Boomerang" như trên, mà di chuyển theo 4 dạng sau, Tenkan và Kijun sẽ liên tục chồng chéo tạo tín hiệu giả.
+  1. Phạm vi Loại 1 (Điển hình): Giá đập đi đập lại giữa chung một đỉnh và một đáy cố định (Typical Range).
+  2. Phạm vi Loại 2 (Sóng P): Phạm vi thu hẹp dần (Tam giác tích lũy).
+  3. Phạm vi Loại 3 (Sóng Y): Phạm vi mở rộng dần (Biến động càn quét 2 đầu).
+  4. Phạm vi Loại 4: Sóng Y biến động mạnh (Có những cây nến Spike vọt lên/xuống rồi rút râu nhanh chóng trong phạm vi).
+  - -> Ở cả 4 mô hình này, việc Tenkan và Kijun cắt nhau là **Kém tin cậy (Fake Cross)** và cần lọc tín hiệu kĩ.
+
+### Chương 14: Bản chất của Chikou span
+
+- **Định nghĩa:** Chikou span là giá đóng cửa hiện tại được lùi về quá khứ 26 phiên (bao gồm cả phiên hiện tại).
+- **Ý nghĩa cốt lõi:** Chikou span đại diện cho **Động lượng (Momentum)** thuần túy của thị trường.
+- **Tính toán động lượng:** Động lượng = Giá đóng cửa nến hiện tại - Giá đóng cửa N nến trước đó.
+- **Tín hiệu giao dịch cơ bản:**
+  - **Gold Cross (Mua):** Khi Chikou span cắt lên trên đường giá của 26 phiên trước. Lúc này động lượng > 0.
+  - **Dead Cross (Bán):** Khi Chikou span cắt xuống dưới đường giá của 26 phiên trước. Lúc này động lượng < 0.
+- **Mối liên hệ với các đường khác:**
+  - Chikou span vs Tenkan sen (9 phiên): So sánh giá hiện tại với mức thị trường trung bình ngắn hạn (25 nến trước).
+  - Chikou span vs Kijun sen (26 phiên): So sánh giá hiện tại với mức thị trường trung bình trung hạn (25 nến trước).
+  - Chikou span vs Senkou span 2 (52 phiên): So sánh giá hiện tại với mức thị trường dài hạn (50 nến trước).
+- Bản chất Chikou span rất giống với Đường trung bình động (Moving Average) chu kỳ 25 hoặc 26.
+
+### Chương 15: Phân tích trục thời gian thẳng đứng và Dự báo 100 ngày
+
+- **Phân tích trục dọc (Vertical Axis):** Một bậc thầy Ichimoku không chỉ nhìn ngang mà còn nhìn dọc. Tại bất kỳ cây nến hiện tại nào, ta có thể đánh giá toàn diện thị trường bằng cách nhìn dọc xuống:
+  - Giá hiện tại.
+  - Chikou span (Giá hiện tại được dời về 25 nến trước).
+  - Tenkan sen (Trung bình 9 nến).
+  - Kijun sen (Trung bình 26 nến).
+  - Senkou span 1 và 2 (Được dời về tương lai 25 nến).
+- **Dự báo 100 ngày:**
+  - Bằng cách phân tích vị trí tương đối của 5 đường này trên cùng một trục dọc của ngày hôm nay, ta có thể dự báo được biến động giá của khoảng 100 ngày (từ chuyển động quá khứ đến tương lai).
+  - Bước 1: Xem xét Chikou span (động lượng so với 26 ngày trước).
+  - Bước 2: Xem xét Tenkan sen (trung bình 9 ngày qua).
+  - Bước 3: Xem xét Kijun sen (trung bình 26 ngày qua).
+  - Bước 4: Xem xét Senkou span B (trung bình 52 ngày, vẽ ở 26 ngày đằng trước).
+  - Bước 5: Xem xét Senkou span A (trung bình của Tenkan và Kijun, vẽ ở 26 ngày đằng trước).
+- Việc tổng hợp các thông tin này giúp xác định xu hướng chính, các mức hỗ trợ/kháng cự quan trọng trong quá khứ, hiện tại và tương lai, từ đó đưa ra quyết định giao dịch có độ chính xác cao. Tránh được các tín hiệu nhiễu khi thị trường đi ngang.

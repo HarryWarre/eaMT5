@@ -68,25 +68,36 @@ input int    InpKijunFlatBars    = 5;       // Số nến Kijun phẳng = Range 
 input double InpMinKumoThick    = 10.0;    // Bề dày Kumo tối thiểu để xác nhận (Ch.12)
 
 input group "========= DCA STRATEGY ========="
-input double InpEntryRiskPct     = 0.5;     // % equity cho lệnh Entry
+input double InpEntryLot         = 0.01;    // Lot cố định cho lệnh Entry
 input string InpDCATPs           = "10,15,20,30";          // TP pips mỗi tầng DCA
 input double InpDCARiskPct       = 2.0;     // Max % equity cho mỗi DCA
 input int    InpDCACooldownBars  = 3;       // Chờ tối thiểu N nến giữa các DCA
 input double InpMinDCAGap        = 5.0;     // Khoảng cách tối thiểu  DCA (pips)
 
+input group "========= PYRAMID DCA (Thuận Trend) ========="
+input bool   InpEnablePyramid    = true;    // Bật Pyramid DCA dương
+input double InpMinPyramidGap    = 5.0;     // Khoảng cách tối thiểu giữa các lệnh Pyramid
+
 input group "========= HÒA VỐN (Breakeven) ========="
 input bool   InpEnableBE         = true;    // Bật chế độ hòa vốn
 input int    InpBEAfterDCA       = 2;       // Kích hoạt hòa vốn sau DCA level X
+input double InpBEPips           = 5.0;     // Mức lợi nhuận (pips) để đóng hòa vốn
 
-input group "========= TỈA LỆNH (Trim) ========="
-input bool   InpEnableTrim       = true;    // Bật chế độ tỉa lệnh
+input group "========= TỈA LỆNH (Trim Z-Score DCA) ========="
+input bool   InpEnableTrim       = true;    // Bật tỉa lệnh Z-Score
+input bool   InpEnableTrimTotalBE= true;    // Tính Lot tỉa để Gồng Hòa Vốn Tổng
 input int    InpTrimAfterDCA     = 2;       // Tỉa sau DCA level X
-input double InpTrimSLPips       = 10.0;    // SL cho lệnh tỉa (pips)
-input double InpTrimTPPips       = 15.0;    // TP cho lệnh tỉa (pips)
+input string InpTrimDCATPs       = "15,20,30,40";           // TP pips rổ tỉa
+input int    InpTrimZPeriod      = 50;      // Chu kỳ Z-Score
+input double InpTrimZThreshold   = 2.0;     // Mức Z-Score kích hoạt tỉa
+input int    InpTrimBEAfterDCA   = 2;       // Kích hòa vốn tỉa sau DCA level X
+input double InpTrimBEPips       = 5.0;     // Mức hòa vốn (pips) rổ tỉa
 
 input group "========= GỘP TP (Merged TP) ========="
-input bool   InpEnableMergedTP   = true;    // Bật gộp TP
+input bool   InpEnableMergedTP   = true;    // Bật gộp TP rổ chính
 input int    InpMergedTPLevel    = 3;       // Lấy TP của DCA level này để đóng hết
+input bool   InpEnableTrimMTP    = true;    // Bật gộp TP rổ tỉa
+input int    InpTrimMTPLevel     = 2;       // Lấy TP của tỉa level này để đóng rổ tỉa
 
 input group "========= SESSION & TIME ========="
 input bool   InpUseTimeFilter    = true;
@@ -113,15 +124,19 @@ CSymbolInfo m_symbol;
 int      g_direction     = 0;      // 1=BUY, -1=SELL, 0=chờ tín hiệu
 int      g_dcaLevel      = 0;      // Tầng DCA hiện tại (0=entry, 1-N=DCA)
 datetime g_lastDCATime   = 0;      // Thời gian DCA gần nhất
+datetime g_lastPyramidTime = 0;    // Thời gian Pyramid DCA gần nhất
 int      g_cycleWins     = 0;      // Số chu kỳ thắng
 double   g_cycleProfit   = 0;      // Tổng profit tích lũy
 
 // Parsed DCA arrays
-double   g_dcaTP[];                // TP pips mỗi tầng (parsed, extends with last value)
+double   g_dcaTP[];                // TP pips mỗi tầng rổ chính
+double   g_trimDcaTP[];            // TP pips mỗi tầng rổ tỉa
 
 // Trim tracking
-ulong    g_trimTicket    = 0;      // Ticket của lệnh tỉa đang mở
-bool     g_trimActive    = false;  // Có lệnh tỉa đang hoạt động
+bool     g_trimActive    = false;  // Có rổ tỉa đang hoạt động
+int      g_trimDirection = 0;      // Hướng của rổ tỉa (1=BUY, -1=SELL)
+int      g_trimDcaLevel  = 0;      // Tầng DCA của rổ tỉa
+datetime g_lastTrimTime  = 0;      // Thời gian DCA của rổ tỉa
 
 // Ichimoku state
 ENUM_ICHI_STATE g_ichiState = ICHI_RANGE;
@@ -500,11 +515,14 @@ void UpdateMatrixScore() {
 //+------------------------------------------------------------------+
 //| SECTION 9: POSITION HELPERS                                      |
 //+------------------------------------------------------------------+
-int CountPositions(int dir=0) {
+int CountPositions(int dir=0, bool isTrim=false) {
    int c = 0;
    for(int i=0; i<PositionsTotal(); i++) {
       ulong tk = PositionGetTicket(i);
       if(PositionGetInteger(POSITION_MAGIC)!=InpMagicNumber || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+      bool isTrimPos = (StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0);
+      if(isTrimPos != isTrim) continue;
+      
       if(dir==0) { c++; continue; }
       if(dir==1 && PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY) c++;
       if(dir==-1 && PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_SELL) c++;
@@ -512,35 +530,72 @@ int CountPositions(int dir=0) {
    return c;
 }
 
-double GetBasketProfit() {
+double GetBasketProfit(bool isTrim=false) {
    double total = 0;
    for(int i=0; i<PositionsTotal(); i++) {
       ulong tk = PositionGetTicket(i);
       if(PositionGetInteger(POSITION_MAGIC)!=InpMagicNumber || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+      bool isTrimPos = (StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0);
+      if(isTrimPos != isTrim) continue;
+      
       total += PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
    }
    return total;
 }
 
-double GetTotalLots() {
+double GetTotalLots(bool isTrim=false) {
    double total = 0;
    for(int i=0; i<PositionsTotal(); i++) {
       ulong tk = PositionGetTicket(i);
       if(PositionGetInteger(POSITION_MAGIC)!=InpMagicNumber || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+      bool isTrimPos = (StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0);
+      if(isTrimPos != isTrim) continue;
+      
       total += PositionGetDouble(POSITION_VOLUME);
    }
    return total;
 }
 
-double GetLastEntryPrice() {
+double GetLastEntryPrice(bool isTrim=false) {
    double p = 0; datetime t = 0;
    for(int i=0; i<PositionsTotal(); i++) {
       ulong tk = PositionGetTicket(i);
       if(PositionGetInteger(POSITION_MAGIC)!=InpMagicNumber || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+      bool isTrimPos = (StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0);
+      if(isTrimPos != isTrim) continue;
+      
       datetime tt = (datetime)PositionGetInteger(POSITION_TIME);
       if(tt > t) { t = tt; p = PositionGetDouble(POSITION_PRICE_OPEN); }
    }
    return p;
+}
+
+double GetExtremeEntryPrice(bool isTrim=false) {
+   double extreme = 0;
+   int dir = isTrim ? g_trimDirection : g_direction;
+   for(int i=0; i<PositionsTotal(); i++) {
+      ulong tk = PositionGetTicket(i);
+      if(PositionGetInteger(POSITION_MAGIC)!=InpMagicNumber || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
+      bool isTrimPos = (StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0);
+      if(isTrimPos != isTrim) continue;
+      
+      double p = PositionGetDouble(POSITION_PRICE_OPEN);
+      if(extreme == 0) { extreme = p; continue; }
+      
+      if(dir == 1 && p > extreme) extreme = p;
+      if(dir == -1 && p < extreme) extreme = p;
+   }
+   return extreme;
+}
+
+void CloseBasket(bool isTrim) {
+   for(int i=PositionsTotal()-1; i>=0; i--) {
+      ulong tk = PositionGetTicket(i);
+      if(PositionGetInteger(POSITION_MAGIC)==InpMagicNumber && PositionGetString(POSITION_SYMBOL)==_Symbol) {
+         bool isTrimPos = (StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0);
+         if(isTrimPos == isTrim) m_trade.PositionClose(tk);
+      }
+   }
 }
 
 void CloseAllPositions() {
@@ -558,8 +613,26 @@ double AdjustLots(double vol) {
 }
 
 //+------------------------------------------------------------------+
-//| SECTION 10: HELPER PARSERS                                       |
+//| SECTION 10: HELPER PARSERS & INDICATORS                          |
 //+------------------------------------------------------------------+
+double GetZScore(int period, ENUM_TIMEFRAMES tf) {
+   double close[];
+   if(CopyClose(_Symbol, tf, 0, period, close) < period) return 0;
+   
+   double mean = 0;
+   for(int i=0; i<period; i++) mean += close[i];
+   mean /= period;
+   
+   double variance = 0;
+   for(int i=0; i<period; i++) variance += MathPow(close[i] - mean, 2);
+   variance /= period;
+   
+   double stdDev = MathSqrt(variance);
+   if(stdDev == 0) return 0;
+   
+   return (close[period-1] - mean) / stdDev;
+}
+
 // Parse "0.02,0.03,0.05" → double array
 int ParseDoubleList(string str, double &arr[]) {
    string parts[];
@@ -573,13 +646,14 @@ int ParseDoubleList(string str, double &arr[]) {
 }
 
 // Giá trung bình gia quyền (weighted average price)
-double GetAvgPrice() {
+double GetAvgPrice(bool isTrim=false) {
    double totalCost = 0, totalVol = 0;
    for(int i=0; i<PositionsTotal(); i++) {
       ulong tk = PositionGetTicket(i);
       if(PositionGetInteger(POSITION_MAGIC)!=InpMagicNumber || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
-      string comment = PositionGetString(POSITION_COMMENT);
-      if(StringFind(comment, "TRIM") >= 0) continue; // Bỏ qua lệnh tỉa
+      bool isTrimPos = (StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0);
+      if(isTrimPos != isTrim) continue;
+      
       double v = PositionGetDouble(POSITION_VOLUME);
       double p = PositionGetDouble(POSITION_PRICE_OPEN);
       totalCost += p * v;
@@ -588,18 +662,74 @@ double GetAvgPrice() {
    return (totalVol > 0) ? totalCost / totalVol : 0;
 }
 
-// Lấy giá Entry của chu kỳ hiện tại
-double GetInitialEntryPrice() {
+// Lấy giá Entry ban đầu của rổ
+double GetInitialEntryPrice(bool isTrim=false) {
    for(int i=0; i<PositionsTotal(); i++) {
       ulong tk = PositionGetTicket(i);
       if(PositionGetInteger(POSITION_MAGIC)==InpMagicNumber && PositionGetString(POSITION_SYMBOL)==_Symbol) {
          string comment = PositionGetString(POSITION_COMMENT);
-         if(StringFind(comment, "ENTRY") >= 0) {
+         bool isTrimPos = (StringFind(comment, "TRIM") >= 0);
+         if(isTrimPos != isTrim) continue;
+         
+         if(StringFind(comment, isTrim ? "TRIM ENTRY" : "ENTRY") >= 0) {
             return PositionGetDouble(POSITION_PRICE_OPEN);
          }
       }
    }
-   return GetAvgPrice(); // Fallback
+   return GetAvgPrice(isTrim); // Fallback
+}
+
+// Tính Lot động để kéo TP về mức hòa vốn 1 rổ hoặc hòa vốn tổng (Total BE)
+double CalculateRecoveryLot(bool isTrim, double srLevel, double tpPips) {
+    double vSelf = GetTotalLots(isTrim);
+    double tpDistPrice = tpPips * g_point * g_p2p;
+    
+    if(!InpEnableTrimTotalBE) {
+        // Rổ nào tính rổ đó (Basic recovery)
+        if(vSelf == 0) return 0;
+        double avgSelf = GetAvgPrice(isTrim);
+        int dirSelf = isTrim ? g_trimDirection : g_direction;
+        if(dirSelf == 0) return 0;
+        
+        double recovery = 0;
+        if(dirSelf == 1) recovery = (avgSelf - srLevel - tpDistPrice) * vSelf / tpDistPrice;
+        else recovery = (srLevel - avgSelf - tpDistPrice) * vSelf / tpDistPrice;
+        return MathMax(0.0, recovery);
+    }
+    
+    // Total Breakeven Logic (Cầu hòa chung 2 rổ)
+    double vOther = GetTotalLots(!isTrim);
+    if(vOther == 0) {
+        // Rổ kia không có lệnh -> Tính như Basic recovery
+        if(vSelf == 0) return 0;
+        double avgSelf = GetAvgPrice(isTrim);
+        int dirSelf = isTrim ? g_trimDirection : g_direction;
+        if(dirSelf == 0) return 0;
+        
+        double recovery = 0;
+        if(dirSelf == 1) recovery = (avgSelf - srLevel - tpDistPrice) * vSelf / tpDistPrice;
+        else recovery = (srLevel - avgSelf - tpDistPrice) * vSelf / tpDistPrice;
+        return MathMax(0.0, recovery);
+    }
+    
+    // Có cả 2 rổ -> Giải phương trình bậc 2 tìm Lot X
+    double avgSelf = GetAvgPrice(isTrim);
+    double avgOther = GetAvgPrice(!isTrim);
+    int dirSelf = isTrim ? g_trimDirection : g_direction;
+    if(dirSelf == 0) return 0;
+    
+    // Tự động triệt tiêu đệ quy của mức giá TB mới và mức giá TP mới
+    double A = tpDistPrice;
+    double B = 2.0 * vSelf * tpDistPrice - vOther * dirSelf * (srLevel + dirSelf * tpDistPrice - avgOther);
+    double C = vSelf * vSelf * tpDistPrice - vSelf * vOther * dirSelf * (avgSelf + dirSelf * tpDistPrice - avgOther);
+    
+    if(C >= 0) return 0.0; // Đã đủ Lot hòa vốn tổng nếu giá chạm mức TP mới, không cần thêm Lot
+    
+    double delta = B * B - 4.0 * A * C;
+    if(delta < 0) return 0.0; // Không thể hòa vốn tổng bằng DCA
+    
+    double x = (-B + MathSqrt(delta)) / (2.0 * A);
+    return MathMax(0.0, x);
 }
 
 // Quét các mức Kijun/SSB đi ngang trong quá khứ làm S/R tĩnh
@@ -673,169 +803,353 @@ int GetHistoricalSRLevels(C_Ichimoku &ichi, double refPrice, int dir, double &ou
 //| SECTION 11: 3 CHẾ ĐỘ QUẢN LÝ                                   |
 //+------------------------------------------------------------------+
 
-// ==========================================
-// 11.1: HÒA VỐN (Breakeven)
-// Khi DCA sâu (>= InpBEAfterDCA), canh P/L >= 0 → chốt sạch
-// Vol DCA lớn nên chỉ cần giá bounce nhẹ là về hòa vốn
-// ==========================================
 bool ManageBreakeven() {
    if(!InpEnableBE) return false;
    if(g_dcaLevel < InpBEAfterDCA) return false;
    
-   double profit = GetBasketProfit();
-   if(profit >= 0) {
-      double lots = GetTotalLots();
-      int count = CountPositions();
-      CloseAllPositions();
+   double profit = GetBasketProfit(false);
+   double avgPrice = GetAvgPrice(false);
+   double currentPrice = (g_direction == 1) ? m_symbol.Bid() : m_symbol.Ask();
+   double pips = 0;
+   if(g_direction == 1) pips = (currentPrice - avgPrice) / (g_point * g_p2p);
+   else if(g_direction == -1) pips = (avgPrice - currentPrice) / (g_point * g_p2p);
+   
+   if(pips >= InpBEPips) {
+      double lots = GetTotalLots(false);
+      int count = CountPositions(0, false);
+      CloseBasket(false);
       g_cycleWins++;
       g_cycleProfit += profit;
-      PrintFormat("⚖️ HÒA VỐN #%d: %.2f USD | L%d | %d pos %.2f lot | Tổng: +%.2f",
-         g_cycleWins, profit, g_dcaLevel, count, lots, g_cycleProfit);
-      g_direction=0; g_dcaLevel=0; g_lastDCATime=0; g_trimActive=false;
+      PrintFormat("⚖️ HÒA VỐN CHÍNH #%d: %.1f pips (%.2f USD) | L%d | %d pos %.2f lot | Tổng: +%.2f",
+         g_cycleWins, pips, profit, g_dcaLevel, count, lots, g_cycleProfit);
+      g_direction=0; g_dcaLevel=0; g_lastDCATime=0; g_lastPyramidTime=0;
+      return true;
+   }
+   return false;
+}
+
+bool ManageTrimBreakeven() {
+   if(!InpEnableTrim) return false;
+   if(g_trimDcaLevel < InpTrimBEAfterDCA) return false;
+   
+   double profit = GetBasketProfit(true);
+   double avgPrice = GetAvgPrice(true);
+   double currentPrice = (g_trimDirection == 1) ? m_symbol.Bid() : m_symbol.Ask();
+   double pips = 0;
+   if(g_trimDirection == 1) pips = (currentPrice - avgPrice) / (g_point * g_p2p);
+   else if(g_trimDirection == -1) pips = (avgPrice - currentPrice) / (g_point * g_p2p);
+   
+   if(pips >= InpTrimBEPips) {
+      double lots = GetTotalLots(true);
+      int count = CountPositions(0, true);
+      CloseBasket(true);
+      g_cycleProfit += profit;
+      PrintFormat("⚖️ HÒA VỐN TỈA: %.1f pips (%.2f USD) | L%d | %d pos %.2f lot | Tổng: +%.2f",
+         pips, profit, g_trimDcaLevel, count, lots, g_cycleProfit);
+      g_trimActive = false; g_trimDirection = 0; g_trimDcaLevel = 0; g_lastTrimTime = 0;
       return true;
    }
    return false;
 }
 
 // ==========================================
-// 11.2: TỈA LỆNH (Trim)
-// Mở lệnh ngược chiều DCA để cắt bớt exposure
-// Lệnh tỉa có SL chặt - nếu tỉa hụt thì cắt bỏ ngay
-// Khi lệnh tỉa lãi, đóng nó + đóng 1 lệnh DCA lỗ nhiều nhất
+// 11.2: TỈA LỆNH (Trim Z-Score DCA)
+// Khi rổ chính bị kẹt (DCA sâu), kích hoạt rổ tỉa ngược chiều.
+// Entry bằng Z-Score, DCA bằng S/R ngược chiều của rổ chính.
+// TP được tính bằng Pips giống DCA logic nhưng không có SL.
 // ==========================================
 void ManageTrim() {
    if(!InpEnableTrim) return;
-   if(g_dcaLevel < InpTrimAfterDCA) return;
+   
+   // Tự reset nếu lệnh tỉa chạm mức TP rổ chính và đóng tự động
+   if(g_trimActive && CountPositions(0, true) == 0) {
+      g_trimActive = false; g_trimDirection = 0; g_trimDcaLevel = 0; g_lastTrimTime = 0;
+   }
+   
+   int trimCount = CountPositions(0, true);
+   
+   // Ưu tiên 1: Hòa vốn Trim
+   if(trimCount > 0 && ManageTrimBreakeven()) return;
+   
+   // Chưa đủ điều kiện mở rổ tỉa
+   if(!g_trimActive && g_dcaLevel < InpTrimAfterDCA) return;
    
    double ask = m_symbol.Ask();
    double bid = m_symbol.Bid();
-   double slDist = InpTrimSLPips * g_point * g_p2p;
-   double tpDist = InpTrimTPPips * g_point * g_p2p;
    
-   // Kiểm tra lệnh tỉa đang mở
-   if(g_trimActive) {
-      bool found = false;
-      for(int i=0; i<PositionsTotal(); i++) {
-         ulong tk = PositionGetTicket(i);
-         if(tk == g_trimTicket) { found = true; break; }
+   // Lấy TP Pips từ cấu hình DCA rổ tỉa
+   int tpSize = ArraySize(g_trimDcaTP);
+   double tpPips = (tpSize > 0) ? g_trimDcaTP[MathMin(g_trimDcaLevel, tpSize-1)] : 15;
+   double tpDist = tpPips * g_point * g_p2p;
+   
+   if(!g_trimActive) {
+      // Tìm điểm Entry đầu tiên rổ tỉa bằng Z-Score
+      double z = GetZScore(InpTrimZPeriod, InpBaseTF);
+      
+      bool trigger = false;
+      if(g_direction == 1 && z >= InpTrimZThreshold) {
+         // Lệnh chính BUY kẹt -> Giá đang giảm mạnh -> Bắt nhịp hồi Tỉa SELL (Z-Score đỉnh)
+         g_trimDirection = -1; trigger = true;
       }
-      if(!found) {
-         // Lệnh tỉa đã đóng (SL/TP hit)
-         g_trimActive = false;
-         g_trimTicket = 0;
+      else if(g_direction == -1 && z <= -InpTrimZThreshold) {
+         // Lệnh chính SELL kẹt -> Giá đang tăng mạnh -> Bắt nhịp hồi Tỉa BUY (Z-Score đáy)
+         g_trimDirection = 1; trigger = true;
+      }
+      
+      if(trigger) {
+         double price = (g_trimDirection == 1) ? ask : bid;
+         // Lấy Lot đầu tiên dựa theo hàm phục hồi tổng hợp (nếu có TotalBE) hoặc Lot gốc
+         double recoveryLot = CalculateRecoveryLot(true, price, tpPips);
+         double initLot = AdjustLots(MathMax(recoveryLot, InpEntryLot));
+         // Phải lấy TP cách điểm vào lệnh chuẩn tpDist Price
+         double tp = (g_trimDirection == 1) ? ask + tpDist : bid - tpDist;
+         string comment = "PX TRIM ENTRY L1";
          
-         // Nếu lệnh tỉa thắng (TP hit) → tìm và đóng 1 lệnh DCA lỗ nhất
-         // (MT5 đã đóng lệnh tỉa, giờ tìm DCA lỗ nhất để đóng)
-         double worstProfit = 0;
-         ulong worstTicket = 0;
-         for(int i=0; i<PositionsTotal(); i++) {
-            ulong tk = PositionGetTicket(i);
-            if(PositionGetInteger(POSITION_MAGIC)!=InpMagicNumber || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
-            double p = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
-            if(p < worstProfit) { worstProfit = p; worstTicket = tk; }
-         }
-         if(worstTicket > 0 && CountPositions() > 1) {
-            m_trade.PositionClose(worstTicket);
-            g_dcaLevel = MathMax(0, g_dcaLevel - 1);
-            PrintFormat("✂️ TỈA: Đóng DCA lỗ nhất #%llu (%.2f USD) | DCA còn L%d",
-               worstTicket, worstProfit, g_dcaLevel);
-         }
-      }
-      return; // Đang có lệnh tỉa → không mở thêm
-   }
-   
-   // Mở lệnh tỉa mới: ngược chiều DCA, lot nhỏ, SL/TP chặt
-   // Chỉ mở khi có tín hiệu Ichimoku ngược chiều (Sanyaku đảo)
-   S_IchiData d0, d1;
-   if(!m_ichiBase.Get(0, d0) || !m_ichiBase.Get(1, d1)) return;
-   
-   // Lot tỉa = nhỏ, dùng % equity giống entry
-   double trimEq = AccountInfoDouble(ACCOUNT_EQUITY);
-   double trimTV = m_symbol.TickValue();
-   double trimLot = m_symbol.LotsMin();
-   if(trimTV > 0) trimLot = (trimEq * InpEntryRiskPct / 100.0) / (InpTrimSLPips * trimTV / m_symbol.TickSize() * g_point * g_p2p);
-   trimLot = AdjustLots(trimLot);
-   bool trimSignal = false;
-   
-   if(g_direction == 1) {
-      // DCA BUY → tỉa = SELL
-      // Tín hiệu: TK Dead Cross hoặc giá dưới Kijun
-      if(d0.tenkan < d0.kijun && d1.tenkan >= d1.kijun) trimSignal = true;
-      if(trimSignal) {
-         double sl = bid + slDist;
-         double tp = bid - tpDist;
-         if(m_trade.Sell(trimLot, _Symbol, bid, sl, tp, "PX TRIM SELL")) {
-            g_trimTicket = m_trade.ResultOrder();
-            g_trimActive = true;
-            PrintFormat("✂️ TRIM SELL: %.2f lot @ %.5f | SL: %.5f | TP: %.5f", trimLot, bid, sl, tp);
+         bool ok = false;
+         if(g_trimDirection == 1) ok = m_trade.Buy(initLot, _Symbol, ask, 0, tp, comment);
+         else ok = m_trade.Sell(initLot, _Symbol, bid, 0, tp, comment);
+         
+         if(ok) {
+            g_trimActive = true; g_trimDcaLevel = 1; g_lastTrimTime = TimeCurrent();
+            PrintFormat("✂️ TRIM ENTRY [%s]: %.2f lot @ %.5f | TP: %.5f (Z=%.2f)",
+               (g_trimDirection==1)?"BUY":"SELL", initLot, price, tp, z);
          }
       }
    }
-   else if(g_direction == -1) {
-      // DCA SELL → tỉa = BUY
-      if(d0.tenkan > d0.kijun && d1.tenkan <= d1.kijun) trimSignal = true;
-      if(trimSignal) {
-         double sl = ask - slDist;
-         double tp = ask + tpDist;
-         if(m_trade.Buy(trimLot, _Symbol, ask, sl, tp, "PX TRIM BUY")) {
-            g_trimTicket = m_trade.ResultOrder();
-            g_trimActive = true;
-            PrintFormat("✂️ TRIM BUY: %.2f lot @ %.5f | SL: %.5f | TP: %.5f", trimLot, ask, sl, tp);
+   else {
+      // Đã có lệnh tỉa -> Tự DCA rổ tỉa theo Ichimoku S/R của HƯỚNG TỈA
+      long periodSec = PeriodSeconds(InpBaseTF);
+      if(periodSec > 0 && (TimeCurrent() - g_lastTrimTime) < InpDCACooldownBars * periodSec) return;
+      
+      double initPrice = GetInitialEntryPrice(true);
+      if(initPrice <= 0) return;
+      
+      // Quét cản tĩnh nhưng với hướng của g_trimDirection
+      double srLevels[];
+      int numLevels = GetHistoricalSRLevels(m_ichiBase, initPrice, g_trimDirection, srLevels, 20);
+      
+      int nextLvl = g_trimDcaLevel;
+      double srLevel = 0; string srName = ""; bool touched = false;
+      double price = iClose(_Symbol, InpBaseTF, 1);
+      double lastPrice = GetLastEntryPrice(true);
+      
+      if(nextLvl < numLevels) {
+         srLevel = srLevels[nextLvl]; srName = "T_FLAT_SR" + IntegerToString(nextLvl+1);
+         if(lastPrice > 0) {
+            double gap = MathAbs(price - lastPrice) / (g_point * g_p2p);
+            if(gap < InpMinDCAGap) return;
          }
+         double prevPrice = iClose(_Symbol, InpBaseTF, 2);
+         if(g_trimDirection == 1) touched = (price <= srLevel && prevPrice > srLevel);
+         if(g_trimDirection == -1) touched = (price >= srLevel && prevPrice < srLevel);
+      } else {
+         srLevel = price; srName = "T_GAP_L" + IntegerToString(nextLvl+1);
+         if(lastPrice > 0) {
+            double gap = MathAbs(price - lastPrice) / (g_point * g_p2p);
+            if(gap >= InpMinDCAGap * 2.0) {
+               if(g_trimDirection == 1 && price < lastPrice) touched = true;
+               if(g_trimDirection == -1 && price > lastPrice) touched = true;
+            }
+         }
+      }
+      
+      if(!touched) return;
+      
+      // Lấy Recovery Lot
+      double recoveryLot = CalculateRecoveryLot(true, srLevel, tpPips);
+      
+      // Không bị cap bởi Equity gắt gao như rổ chính, nhưng cũng không cho phình quá to
+      double dcaLot = AdjustLots(MathMax(recoveryLot, InpEntryLot));
+      
+      bool ok = false; string comment = "PX TRIM DCA" + IntegerToString(nextLvl+1);
+      if(g_trimDirection == 1) {
+         double tp = (tpPips > 0) ? ask + tpDist : 0;
+         ok = m_trade.Buy(dcaLot, _Symbol, ask, 0, tp, comment);
+      } else if(g_trimDirection == -1) {
+         double tp = (tpPips > 0) ? bid - tpDist : 0;
+         ok = m_trade.Sell(dcaLot, _Symbol, bid, 0, tp, comment);
+      }
+      
+      if(ok) {
+         g_trimDcaLevel = nextLvl + 1; g_lastTrimTime = TimeCurrent();
+         double newAvg = GetAvgPrice(true);
+         double sharedTP = 0;
+         
+         if(tpPips > 0) {
+            if(g_trimDirection == 1) sharedTP = newAvg + tpDist;
+            else if(g_trimDirection == -1) sharedTP = newAvg - tpDist;
+            
+            for(int i = 0; i < PositionsTotal(); i++) {
+               ulong tk = PositionGetTicket(i);
+               if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && PositionGetString(POSITION_SYMBOL) == _Symbol) {
+                  if(StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0) {
+                     m_trade.PositionModify(tk, PositionGetDouble(POSITION_SL), sharedTP);
+                  }
+               }
+            }
+         }
+         PrintFormat("✂️ TRIM DCA L%d [%s]: %.2f lot @ %.5f | TP: %.5f", g_trimDcaLevel, srName, dcaLot, (g_trimDirection==1)?ask:bid, sharedTP);
       }
    }
 }
 
 // ==========================================
 // 11.3: GỘP TP (Merged TP)
-// Gộp TP: Lấy TP của DCA level chỉ định để đóng tất cả
-// Ví dụ: InpMergedTPLevel=3, TP của L3=30 pips
-// → Khi giá chạm TP của L3, đóng toàn bộ lệnh
 // ==========================================
-void UpdateMergedTP() {
-   if(!InpEnableMergedTP) return;
-   if(g_dcaLevel < InpMergedTPLevel) return; // Chưa đủ level
-   if(CountPositions() < 2) return;
+void UpdateMergedTP(bool isTrim) {
+   bool enabled = isTrim ? InpEnableTrimMTP : InpEnableMergedTP;
+   int targetLevel = isTrim ? InpTrimMTPLevel : InpMergedTPLevel;
+   string prefix = isTrim ? "PX TRIM DCA" : "PX DCA";
+   int activeLevel = isTrim ? g_trimDcaLevel : g_dcaLevel;
+   int dir = isTrim ? g_trimDirection : g_direction;
+   
+   if(!enabled) return;
+   if(activeLevel < targetLevel) return; // Chưa đủ level
+   if(CountPositions(0, isTrim) < 2) return;
    
    // Lấy TP pips của level chỉ định
-   int tpIdx = InpMergedTPLevel - 1; // 0-based
-   if(tpIdx >= ArraySize(g_dcaTP)) return;
-   double tpPips = g_dcaTP[tpIdx];
+   double tpPips = 0;
+   if(isTrim) {
+      int tpIdx = targetLevel - 1;
+      if(tpIdx >= ArraySize(g_trimDcaTP)) return;
+      tpPips = g_trimDcaTP[tpIdx];
+   } else {
+      int tpIdx = targetLevel - 1;
+      if(tpIdx >= ArraySize(g_dcaTP)) return;
+      tpPips = g_dcaTP[tpIdx];
+   }
    
-   // Tìm giá entry của DCA level đó
-   // Lệnh DCA level X có comment "PX DCAX"
-   string targetComment = "PX DCA" + IntegerToString(InpMergedTPLevel);
+   string targetComment = prefix + IntegerToString(targetLevel);
    double refPrice = 0;
    for(int i=0; i<PositionsTotal(); i++) {
       ulong tk = PositionGetTicket(i);
       if(PositionGetInteger(POSITION_MAGIC)!=InpMagicNumber || PositionGetString(POSITION_SYMBOL)!=_Symbol) continue;
-      if(PositionGetString(POSITION_COMMENT) == targetComment) {
+      bool isTrimPos = (StringFind(PositionGetString(POSITION_COMMENT), "TRIM") >= 0);
+      if(isTrimPos == isTrim && PositionGetString(POSITION_COMMENT) == targetComment) {
          refPrice = PositionGetDouble(POSITION_PRICE_OPEN);
          break;
       }
    }
    if(refPrice <= 0) return;
    
-   // Tính TP từ giá entry của level chỉ định
    double tpDist = tpPips * g_point * g_p2p;
    double mergedTP = 0;
-   if(g_direction == 1) mergedTP = refPrice + tpDist;
-   else if(g_direction == -1) mergedTP = refPrice - tpDist;
+   if(dir == 1) mergedTP = refPrice + tpDist;
+   else if(dir == -1) mergedTP = refPrice - tpDist;
    else return;
    
-   // Kiểm tra: khi giá chạm mergedTP → đóng tất cả
-   double price = (g_direction == 1) ? m_symbol.Bid() : m_symbol.Ask();
-   bool tpHit = (g_direction == 1 && price >= mergedTP) || (g_direction == -1 && price <= mergedTP);
+   double price = (dir == 1) ? m_symbol.Bid() : m_symbol.Ask();
+   bool tpHit = (dir == 1 && price >= mergedTP) || (dir == -1 && price <= mergedTP);
    
    if(tpHit) {
-      double profit = GetBasketProfit();
-      int count = CountPositions();
-      CloseAllPositions();
-      g_cycleWins++;
+      double profit = GetBasketProfit(isTrim);
+      int count = CountPositions(0, isTrim);
+      CloseBasket(isTrim);
       g_cycleProfit += profit;
-      PrintFormat("🎯 GỘP TP L%d #%d: %.2f USD | %d pos | Tổng: +%.2f",
-         InpMergedTPLevel, g_cycleWins, profit, count, g_cycleProfit);
-      g_direction=0; g_dcaLevel=0; g_lastDCATime=0; g_trimActive=false;
+      
+      if(!isTrim) {
+         g_cycleWins++;
+         PrintFormat("🎯 GỘP TP CHÍNH L%d #%d: %.2f USD | %d pos | Tổng: +%.2f", targetLevel, g_cycleWins, profit, count, g_cycleProfit);
+         g_direction=0; g_dcaLevel=0; g_lastDCATime=0; g_lastPyramidTime=0;
+      } else {
+         PrintFormat("🎯 GỘP TP TỈA L%d: %.2f USD | %d pos | Tổng: +%.2f", targetLevel, profit, count, g_cycleProfit);
+         g_trimActive=false; g_trimDirection=0; g_trimDcaLevel=0; g_lastTrimTime=0;
+      }
+   }
+}
+
+// ==========================================
+// 11.4: PYRAMID DCA (DCA thuận trend)
+// Nhồi vol đều khi giá tiếp tục thuận lợi,
+// tại điểm breakout cản Ichimoku chiều ngược lại.
+// ==========================================
+void ManagePyramidDCA() {
+   if(!InpEnablePyramid) return;
+   if(g_direction == 0) return;
+   
+   // Cooldown
+   long periodSec = PeriodSeconds(InpBaseTF);
+   if(periodSec > 0 && (TimeCurrent() - g_lastPyramidTime) < InpDCACooldownBars * periodSec) return;
+   
+   double lastPrice = GetExtremeEntryPrice(false);
+   double ask = m_symbol.Ask();
+   double bid = m_symbol.Bid();
+   double price = (g_direction == 1) ? ask : bid;
+   
+   // Chỉ nhồi khi giá thuận trend (vượt qua đỉnh cực đại của rổ lệnh)
+   if(g_direction == 1 && price <= lastPrice) return;
+   if(g_direction == -1 && price >= lastPrice) return;
+   
+   double initPrice = GetInitialEntryPrice(false);
+   if(initPrice <= 0) return;
+   
+   // Quét cản tĩnh ngược chiều để tìm đỉnh/đáy hỗ trợ cho việc nhồi lệnh
+   double srLevels[];
+   int numLevels = GetHistoricalSRLevels(m_ichiBase, initPrice, -g_direction, srLevels, 50);
+   
+   bool touched = false;
+   double srLevel = 0;
+   string srName = "";
+   
+   for(int i = 0; i < numLevels; i++) {
+      double lvl = srLevels[i];
+      if (g_direction == 1 && lvl <= lastPrice) continue;
+      if (g_direction == -1 && lvl >= lastPrice) continue;
+      
+      // Found the first valid level ahead
+      double gap = MathAbs(lvl - lastPrice) / (g_point * g_p2p);
+      if(gap < InpMinPyramidGap) continue; // Bỏ qua nếu quá gần lệnh mới vào
+      
+      // Chạm hoặc vượt mức cản -> Kích hoạt Nhồi dương ngay
+      if (g_direction == 1 && price >= lvl) {
+         touched = true; srLevel = lvl; srName = "PYR_SR" + IntegerToString(i+1);
+      }
+      if (g_direction == -1 && price <= lvl) {
+         touched = true; srLevel = lvl; srName = "PYR_SR" + IntegerToString(i+1);
+      }
+      break; 
+   }
+   
+   // Cứu cánh bằng Gap nếu hết cản:
+   if (!touched) {
+      double gap = MathAbs(price - lastPrice) / (g_point * g_p2p);
+      if (gap >= InpMinPyramidGap) {
+         if (g_direction == 1 && price > lastPrice) {
+            touched = true; srLevel = price; srName = "PYR_GAP";
+         }
+         if (g_direction == -1 && price < lastPrice) {
+            touched = true; srLevel = price; srName = "PYR_GAP";
+         }
+      }
+   }
+   
+   if(touched) {
+      double vol = AdjustLots(InpEntryLot); // Lấy Lot gốc L0
+      double tpPips = (ArraySize(g_dcaTP) > 0) ? g_dcaTP[0] : 10;
+      double tpDist = tpPips * g_point * g_p2p;
+      string comment = "PX PYRAMID " + ((g_direction==1)?"BUY":"SELL");
+      
+      // Coi như L0 -> Shared TP = entry mới lập + tpPips (Kéo TP của cả dàn lên theo lệnh nhồi)
+      double sharedTP = (g_direction == 1) ? ask + tpDist : bid - tpDist;
+      
+      bool ok = false;
+      if(g_direction == 1) ok = m_trade.Buy(vol, _Symbol, ask, 0, sharedTP, comment);
+      else ok = m_trade.Sell(vol, _Symbol, bid, 0, sharedTP, comment);
+      
+      if(ok) {
+         g_lastPyramidTime = TimeCurrent();
+         // Update TP cho all normal
+         for(int i=0; i<PositionsTotal(); i++) {
+            ulong tk = PositionGetTicket(i);
+            if(PositionGetInteger(POSITION_MAGIC) == InpMagicNumber && PositionGetString(POSITION_SYMBOL) == _Symbol) {
+               if(StringFind(PositionGetString(POSITION_COMMENT), "TRIM") < 0) {
+                  m_trade.PositionModify(tk, PositionGetDouble(POSITION_SL), sharedTP);
+               }
+            }
+         }
+         PrintFormat("🔺 PYRAMID DCA [%s]: %.3f lot @ %.5f | Set TP toàn rổ: %.5f (Cách %.0f pips L0)", 
+             (g_direction==1)?"BUY":"SELL", vol, price, sharedTP, tpPips);
+      }
    }
 }
 
@@ -850,16 +1164,12 @@ void UpdateMergedTP() {
 //| 5. Basket TP → chốt sạch → chu kỳ mới                           |
 //+------------------------------------------------------------------+
 void ManageDCA() {
-   int posCount = CountPositions();
-   double basketProfit = GetBasketProfit();
+   int posCount = CountPositions(0, false);
    
-   // Tự reset trạng thái nếu MT5 đã tự động đóng hết lệnh (VD: hit TP)
+   // Tự reset trạng thái nếu MT5 đã tự động đóng hết lệnh chính (VD: hit TP)
    if(posCount == 0 && g_direction != 0) {
-      g_direction = 0;
-      g_dcaLevel = 0;
-      g_lastDCATime = 0;
-      g_trimActive = false;
-      Print("🔄 Trạng thái đã được reset do không còn lệnh nào (Hit TP/SL).");
+      g_direction = 0; g_dcaLevel = 0; g_lastDCATime = 0; g_lastPyramidTime = 0;
+      Print("🔄 Trạng thái CHÍNH đã được reset do không còn lệnh nào.");
    }
    
    // ===========================================================
@@ -870,21 +1180,24 @@ void ManageDCA() {
    // ===========================================================
    // STEP 1: GỘP TP - Đóng tất cả khi TP của level chỉ định hit
    // ===========================================================
-   if(posCount > 0) UpdateMergedTP();
+   if(posCount > 0) UpdateMergedTP(false);
+   if(CountPositions(0, true) > 0) UpdateMergedTP(true);
    
    // Cập nhật lại posCount sau khi có thể đã đóng lệnh
-   posCount = CountPositions();
+   posCount = CountPositions(0, false);
    if(posCount == 0 && g_direction != 0) {
-      g_direction = 0;
-      g_dcaLevel = 0;
-      g_lastDCATime = 0;
-      g_trimActive = false;
+      g_direction = 0; g_dcaLevel = 0; g_lastDCATime = 0; g_lastPyramidTime = 0;
    }
    
    // ===========================================================
    // STEP 1.5: TỈA LỆNH
    // ===========================================================
    if(posCount > 0) ManageTrim();
+   
+   // ===========================================================
+   // STEP 1.8: PYRAMID DCA 
+   // ===========================================================
+   if(posCount > 0) ManagePyramidDCA();
    
    // Nếu session không cho phép → chỉ quản lý exits
    if(!m_session.CanTrade()) return;
@@ -907,28 +1220,20 @@ void ManageDCA() {
       int sanyaku = SanyakuState(m_ichiBase, price, InpBaseTF);
       
       if(sanyaku == 1) {
-         double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-         double pv = m_symbol.TickValue() * g_p2p; // pip value per lot
          double entryTPpips = (ArraySize(g_dcaTP) > 0) ? g_dcaTP[0] : 10;
-         double vol = m_symbol.LotsMin();
-         if(pv > 0) vol = (eq * InpEntryRiskPct / 100.0) / (entryTPpips * pv);
-         vol = AdjustLots(vol);
+         double vol = AdjustLots(InpEntryLot);
          double entryTP = ask + entryTPpips * g_point * g_p2p;
          if(m_trade.Buy(vol, _Symbol, ask, 0, entryTP, "PX ENTRY BUY")) {
-            g_direction = 1; g_dcaLevel = 0; g_lastDCATime = TimeCurrent();
+            g_direction = 1; g_dcaLevel = 0; g_lastDCATime = TimeCurrent(); g_lastPyramidTime = TimeCurrent();
             PrintFormat("🟢 ENTRY BUY: %.3f lot @ %.5f | TP: %.5f (%.0f pips)", vol, ask, entryTP, entryTPpips);
          }
       }
       else if(sanyaku == -1) {
-         double eq = AccountInfoDouble(ACCOUNT_EQUITY);
-         double pv = m_symbol.TickValue() * g_p2p;
          double entryTPpips = (ArraySize(g_dcaTP) > 0) ? g_dcaTP[0] : 10;
-         double vol = m_symbol.LotsMin();
-         if(pv > 0) vol = (eq * InpEntryRiskPct / 100.0) / (entryTPpips * pv);
-         vol = AdjustLots(vol);
+         double vol = AdjustLots(InpEntryLot);
          double entryTP = bid - entryTPpips * g_point * g_p2p;
          if(m_trade.Sell(vol, _Symbol, bid, 0, entryTP, "PX ENTRY SELL")) {
-            g_direction = -1; g_dcaLevel = 0; g_lastDCATime = TimeCurrent();
+            g_direction = -1; g_dcaLevel = 0; g_lastDCATime = TimeCurrent(); g_lastPyramidTime = TimeCurrent();
             PrintFormat("🔴 ENTRY SELL: %.3f lot @ %.5f | TP: %.5f (%.0f pips)", vol, bid, entryTP, entryTPpips);
          }
       }
@@ -1018,28 +1323,18 @@ void ManageDCA() {
    double tpDist = tpPips * g_point * g_p2p;
    
    double avgOld = GetAvgPrice();
-   double totalOld = GetTotalLots();
+   double totalOld = GetTotalLots(false);
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
    
    // Recovery lot (đơn vị = lots)
-   // Formula: lot cần để kéo avg price về sr + tp_dist
-   double recoveryLot = 0;
-   if(avgOld > 0 && totalOld > 0 && tpDist > 0) {
-      if(g_direction == 1)
-         recoveryLot = (avgOld - srLevel - tpDist) * totalOld / tpDist;
-      else
-         recoveryLot = (srLevel - avgOld - tpDist) * totalOld / tpDist;
-   }
-   if(recoveryLot < 0) recoveryLot = 0;
+   // Tự động tính Total Breakeven nếu bật, nếu không thì tính bình thường rổ chính
+   double recoveryLot = CalculateRecoveryLot(false, srLevel, tpPips);
    
    // Pip value = giá trị 1 pip cho 1 lot
    double pipValue = m_symbol.TickValue() * g_p2p;
    
-   // Min lot = entry risk (nhỏ, fallback)
-   double minLot = m_symbol.LotsMin();
-   if(pipValue > 0) {
-      minLot = (equity * InpEntryRiskPct / 100.0) / (tpPips * pipValue);
-   }
+   // Min lot = entry lot (nhỏ, fallback)
+   double minLot = InpEntryLot;
    if(minLot < m_symbol.LotsMin()) minLot = m_symbol.LotsMin();
    
    // Max lot = % equity cap (dùng TP pips làm risk distance)
@@ -1103,7 +1398,7 @@ void ManageFridayClose() {
       if(profit > 0) { g_cycleWins++; g_cycleProfit += profit; }
       PrintFormat("📅 FRIDAY CLOSE: %d pos | P/L: %.2f USD | Cycles: %d | Total: +%.2f",
          c, profit, g_cycleWins, g_cycleProfit);
-      g_direction = 0; g_dcaLevel = 0; g_lastDCATime = 0;
+      g_direction = 0; g_dcaLevel = 0; g_lastDCATime = 0; g_lastPyramidTime = 0;
    }
 }
 
@@ -1122,14 +1417,21 @@ int OnInit() {
    
    // Parse DCA arrays
    int nTP = ParseDoubleList(InpDCATPs, g_dcaTP);
+   int nTrimTP = ParseDoubleList(InpTrimDCATPs, g_trimDcaTP);
    
-   Print("DCA Config: UNLIMITED (Ichimoku S/R + Gap) | Dynamic Lot");
+   Print("DCA Config MAIN: UNLIMITED (Ichimoku S/R + Gap) | Dynamic Lot");
    string lvlName[4] = {"Tenkan","Kijun","KumoTop","KumoBot"};
    for(int i=0; i<nTP; i++)
       PrintFormat("  L%d%s: TP %g pips",
          i+1, (i<4)?" ["+lvlName[i]+"]":" [GAP]", g_dcaTP[i]);
    if(nTP > 0) PrintFormat("  L%d+: TP %g pips (last value)", nTP+1, g_dcaTP[nTP-1]);
-   Print("Entry: ", InpEntryRiskPct, "% eq | DCA cap: ", InpDCARiskPct, "% eq | MinGap: ", InpMinDCAGap, " pips");
+   
+   Print("DCA Config TRIM: UNLIMITED (Z-Score Entry + Reverse Ichimoku S/R)");
+   for(int i=0; i<nTrimTP; i++)
+      PrintFormat("  TRIM L%d: TP %g pips", i+1, g_trimDcaTP[i]);
+   if(nTrimTP > 0) PrintFormat("  TRIM L%d+: TP %g pips (last value)", nTrimTP+1, g_trimDcaTP[nTrimTP-1]);
+   
+   Print("Entry: ", InpEntryLot, " lot | DCA cap: ", InpDCARiskPct, "% eq | MinGap: ", InpMinDCAGap, " pips");
    
    if(!m_ichiBase.Init(_Symbol, InpBaseTF, InpTenkanPeriod, InpKijunPeriod, InpSenkouPeriod))
       return INIT_FAILED;
@@ -1197,17 +1499,16 @@ public:
    
    void Init() {
       if(!InpShowGUI) return;
-      Rect(px+"BG1", 20, 40, 280, 200, InpGUIBG, C'255,150,0');
-      Label(px+"T1", "🔥 PHOENIX V3: TREND DCA", 30, 50, C'255,150,0', 10);
-      for(int i=0;i<7;i++) Label(px+"L"+IntegerToString(i), "", 30, 72+i*18, InpGUIText, 9);
+      Rect(px+"BG1", 20, 40, 380, 300, InpGUIBG, C'255,150,0');
+      Label(px+"T1", "PHOENIX V3: TREND DCA", 30, 50, C'255,150,0', 10);
+      for(int i=0;i<7;i++) Label(px+"L"+IntegerToString(i), "", 30, 82+i*18, InpGUIText, 7);
       
-      Rect(px+"BG2", 310, 40, 280, 200, InpGUIBG, C'0,200,100');
-      Label(px+"T2", "📊 DCA STATUS", 320, 50, C'0,200,100', 10);
-      for(int i=0;i<7;i++) Label(px+"R"+IntegerToString(i), "", 320, 72+i*18, InpGUIText, 9);
+      Rect(px+"BG2", 410, 40, 480, 300, InpGUIBG, C'0,200,100');
+      Label(px+"T2", "📊 DCA STATUS", 420, 50, C'0,200,100', 10);
+      for(int i=0;i<7;i++) Label(px+"R"+IntegerToString(i), "", 420, 82+i*18, InpGUIText, 7);
    }
    
    void Update() {
-      if(!InpShowGUI) return;
       
       string st;
       switch(g_ichiState) {
@@ -1234,8 +1535,8 @@ public:
       ObjectSetString(0,px+"R0",OBJPROP_TEXT,"Dir   : "+dir+" | DCA L"+IntegerToString(g_dcaLevel)+" (no limit)");
       ObjectSetString(0,px+"R1",OBJPROP_TEXT,"Pos   : "+IntegerToString(CountPositions())+" | Lots: "+DoubleToString(GetTotalLots(),2));
       ObjectSetString(0,px+"R2",OBJPROP_TEXT,"P/L   : "+DoubleToString(GetBasketProfit(),2)+" USD | Avg: "+DoubleToString(GetAvgPrice(),5));
-      ObjectSetString(0,px+"R3",OBJPROP_TEXT,"BE: "+(InpEnableBE?"ON":"OFF")+" | Trim: "+(g_trimActive?"ACT":"---")+" | MTP L"+IntegerToString(InpMergedTPLevel));
-      ObjectSetString(0,px+"R4",OBJPROP_TEXT,"Risk  : Entry "+DoubleToString(InpEntryRiskPct,1)+"% | DCA "+DoubleToString(InpDCARiskPct,1)+"%");
+      ObjectSetString(0,px+"R3",OBJPROP_TEXT,"BE: "+(InpEnableBE?"ON":"OFF")+" | Trim: "+(g_trimActive?"ACT":"---")+" | MTP "+IntegerToString(InpMergedTPLevel)+"/"+IntegerToString(InpTrimMTPLevel));
+      ObjectSetString(0,px+"R4",OBJPROP_TEXT,"Lot   : Entry "+DoubleToString(InpEntryLot,2)+" | DCA max "+DoubleToString(InpDCARiskPct,1)+"%");
       ObjectSetString(0,px+"R5",OBJPROP_TEXT,"Wins  : "+IntegerToString(g_cycleWins)+" | +"+DoubleToString(g_cycleProfit,1)+" USD");
       ObjectSetString(0,px+"R6",OBJPROP_TEXT,"Wins  : "+IntegerToString(g_cycleWins)+" | +"+DoubleToString(g_cycleProfit,1)+" USD");
       
@@ -1246,3 +1547,4 @@ public:
 C_GUI m_gui;
 // End of Phoenix V3
 //+------------------------------------------------------------------+
+ 

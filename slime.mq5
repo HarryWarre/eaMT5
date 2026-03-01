@@ -12,19 +12,26 @@
 //+------------------------------------------------------------------+
 //| ENUMS                                                            |
 //+------------------------------------------------------------------+
-enum ENUM_SIGNAL_MODE { SIG_SANYAKU=0, SIG_GOLD_CROSS=1, SIG_PULLBACK=2, SIG_ALL=3 };
-enum ENUM_DCA_METHOD  { DCA_CLASSIC=0, DCA_2PHASE=1 };
-enum ENUM_TP_METHOD   { TP_FIXED_PIPS=0, TP_DYNAMIC_PIPS=1, TP_TARGET_MONEY=2 };
-enum ENUM_LOT_MODE    { LOT_PERCENT=0, LOT_FIXED=1 };
+enum ENUM_SIGNAL_MODE   { SIG_SANYAKU=0, SIG_GOLD_CROSS=1, SIG_PULLBACK=2, SIG_ALL=3 };
+enum ENUM_DCA_METHOD    { DCA_CLASSIC=0, DCA_2PHASE=1 };
+enum ENUM_TP_METHOD     { TP_FIXED_PIPS=0, TP_DYNAMIC_PIPS=1, TP_TARGET_MONEY=2 };
+enum ENUM_LOT_MODE      { LOT_BALANCE=0, LOT_FIXED=1 };
+enum ENUM_SLIME_STRATEGY{ STRAT_DCA_ICHIMOKU = 0, STRAT_GRID_ZSCORE = 1 };
 
 //+------------------------------------------------------------------+
 //| INPUTS                                                           |
 //+------------------------------------------------------------------+
 input group "=== SLIME MOTHERSHIP (CORE) ==="
+input ENUM_SLIME_STRATEGY InpMotherStrategy = STRAT_DCA_ICHIMOKU; // Chiến lược của Bot Mẹ
 input string InpSymbols      = "XAUUSD,EURUSD"; // Danh sách cặp Mẹ chạy (dấu phẩy)
+input bool   InpMotherTrade  = true;     // Mẹ có tự trade không? (Tắt = Sống bằng thuế)
+input int    InpInitialSlimes= 0;        // Số Slime đẻ sẵn ban đầu 
 input int    InpMagicBase    = 9000000;  // Base Magic Number
 input double InpBaseVol      = 0.01;     // Lot cơ bản của Mẹ
+input int    InpMotherMinGridZScore = 30; // [Z-Score] Cự ly Grid Min (pips)
+input int    InpMotherMaxGridZScore = 80; // [Z-Score] Cự ly Grid Max (pips)
 input double InpSpawnThreshold = 1000.0; // Mốc LN để Mẹ đẻ 1 Slime ($)
+input double InpMotherCapital  = 1000.0; // Vốn cơ bản giữ lại cho Mẹ ($)
 input double InpChildCapital   = 100.0;  // Vốn cấp cho mỗi Slime con ($)
 input double InpChildMinEquity = 20.0;   // Equity tối thiểu để Slime con tồn tại ($)
 input double InpTaxRate        = 0.5;    // Thuế thu từ Slime Con (50%)
@@ -33,8 +40,10 @@ input int    InpMaxSlimes    = 10;       // Giới hạn max số Slime Con
 input group "=== SLIME CHILD SETTINGS ==="
 input string InpChildTimeframes = "M5,M15,H1"; // Danh sách TF cho Slime Con (dấu phẩy)
 input double InpChildVol        = 0.01;        // Lot cơ bản của Slime Con
-input int    InpChildMinGrid    = 20;          // Cự ly Grid Min (pips)
-input int    InpChildMaxGrid    = 50;          // Cự ly Grid Max (pips)
+input int    InpChildMinGrid    = 20;          // [DCA] Cự ly Grid Min (pips)
+input int    InpChildMaxGrid    = 50;          // [DCA] Cự ly Grid Max (pips)
+input int    InpChildMinGridZScore = 30;       // [Z-Score] Cự ly Grid Min (pips)
+input int    InpChildMaxGridZScore = 80;       // [Z-Score] Cự ly Grid Max (pips)
 input double InpChildTPRatio    = 1.0;         // Tỷ lệ TP so với Grid (VD: 1.0 = TP bằng Grid)
 
 input group "=== MOTHERSHIP ICHIMOKU ==="
@@ -48,8 +57,9 @@ input bool   InpUseTrendD1   = true;
 input double InpMinKumoWidth = 0;
 
 input group "=== QUẢN LÝ VỐN ==="
-input ENUM_LOT_MODE InpLotMode = LOT_FIXED; // Chế độ Lot
-input double InpBaseRisk     = 1.0;     // Rủi ro (%) cho Risk Mode
+input ENUM_LOT_MODE InpLotMode = LOT_BALANCE; // Chế độ Lot
+input double InpMotherBalanceStep = 1000.0; // Balance theo 1 Lot Mẹ ($)
+input double InpChildBalanceStep  = 500.0;  // Balance theo 1 Lot Con ($)
 input int    InpMaxOrders    = 20;      // Số lệnh tối đa / cặp
 input double InpMaxDrawdownPct = 50.0;  // Drawdown tối đa (%)
 
@@ -62,6 +72,12 @@ input double InpATRMult      = 1.0;     // ATR hệ số nhân
 input int    InpPhase1Orders = 10;      // [2Phase] Số lệnh GĐ 1
 input int    InpPhase1Dist   = 100;     // [2Phase] Khoảng cách GĐ 1
 input int    InpPhase2Dist   = 150;     // [2Phase] Khoảng cách GĐ 2
+
+input group "=== Z-SCORE GRID LOGIC ==="
+input int    InpZScorePeriod = 1000;       // ML Lookback Period
+input double InpZScoreEntry  = 2.0;        // Z-Score Entry Threshold (e.g. 2.0)
+input double InpZScoreTrailingTarget = 10; // Mục tiêu Trailing ($ cho 0.01 Lot)
+input double InpZScoreTrailingStepPct= 0.2;// Mức chịu đựng Retracement (20% = 0.2)
 
 input group "=== MARTINGALE (3 Levels) ==="
 input int    InpMartStart1   = 4;       // Level 1: Từ lệnh N
@@ -105,6 +121,61 @@ input string InpNT1End       = "21:00"; // Nghỉ 1: Kết thúc
 input int    InpServerGMTOffset = 2;    // Múi giờ Server
 
 //+------------------------------------------------------------------+
+//| Z-SCORE ML CLASS (From Chimera)                                  |
+//+------------------------------------------------------------------+
+class CStatsML
+  {
+private:
+   string            m_symbol;
+   ENUM_TIMEFRAMES   m_timeframe;
+   int               m_period;
+   double            m_mean;
+   double            m_stdDev;
+   double            m_zScore;
+
+public:
+                     CStatsML(void) : m_symbol(""), m_timeframe(PERIOD_CURRENT), m_period(20), m_mean(0), m_stdDev(0), m_zScore(0) {}
+                    ~CStatsML(void) {}
+   bool              Init(string symbol, ENUM_TIMEFRAMES timeframe, int period)
+                     {
+                        m_symbol    = symbol;
+                        m_timeframe = timeframe;
+                        m_period    = period;
+                        return(true);
+                     }
+   void              Update()
+                     {
+                        double closePrices[];
+                        ArraySetAsSeries(closePrices, true);
+                        if(CopyClose(m_symbol, m_timeframe, 0, m_period, closePrices) < m_period) return;
+                        m_mean = CalculateMean(closePrices);
+                        m_stdDev = CalculateStdDev(closePrices, m_mean);
+                        double currentPrice = closePrices[0];
+                        if(m_stdDev > 0) m_zScore = (currentPrice - m_mean) / m_stdDev;
+                        else m_zScore = 0;
+                     }
+   double            GetZScore() { return m_zScore; }
+   double            GetMean()   { return m_mean; }
+   double            GetStdDev() { return m_stdDev; }
+   
+private:
+   double            CalculateMean(const double &data[])
+                     {
+                        double sum = 0;
+                        int size = ArraySize(data);
+                        for(int i=0; i<size; i++) sum += data[i];
+                        return (size > 0) ? sum / size : 0;
+                     }
+   double            CalculateStdDev(const double &data[], double mean)
+                     {
+                        double sumSq = 0;
+                        int size = ArraySize(data);
+                        for(int i=0; i<size; i++) sumSq += MathPow(data[i] - mean, 2);
+                        return (size > 0) ? MathSqrt(sumSq / size) : 0;
+                     }
+  };
+
+//+------------------------------------------------------------------+
 //| GLOBAL HELPERS                                                   |
 //+------------------------------------------------------------------+
 double g_GlobalProfit = 0;
@@ -131,16 +202,31 @@ private:
    double m_pt, m_p2p;
    
    // State
+   string m_logPrefix;
    bool   m_stoppedToday;
    int    m_lastDay, m_lastDealCount;
+   ENUM_SLIME_STRATEGY m_strategy;
    
-   // Stats / Log
-   double m_dayProfit;       // Lợi nhuận hôm nay (đã đóng)
-   int    m_dayWins;         // Số lần thắng hôm nay
-   int    m_dayLosses;       // Số lần thua hôm nay
+   // ML Stats
+   CStatsML *m_statsML;
+   
+   // DCA Grid / Z-Score Variables
    int    m_totalTrades;     // Tổng trade
    int    m_totalWins;       // Tổng thắng
    double m_totalProfit;     // Tổng lợi nhuận
+   
+   // Strategy 1: Z-Score Grid State
+   bool   m_trailingActive;
+   double m_trailingMaxProfit;
+   double m_trailingTarget;
+   double m_trailingStep;
+   bool   m_isCycleFinished;
+   datetime m_lastTradeTime;
+   
+   // Basic Stats / Log
+   double m_dayProfit;       // Lợi nhuận hôm nay (đã đóng)
+   int    m_dayWins;         // Số lần thắng hôm nay
+   int    m_dayLosses;       // Số lần thua hôm nay
    // Bot Settings
    ENUM_TIMEFRAMES m_timeframe;
    double m_vol;
@@ -148,35 +234,65 @@ private:
    double m_tpRatio;
 
 public:
-   CSlimeMotherBot() { m_stoppedToday=false; m_lastDay=-1; m_lastDealCount=0; m_dayProfit=0; m_dayWins=0; m_dayLosses=0; m_totalTrades=0; m_totalWins=0; m_totalProfit=0; m_hIchi=INVALID_HANDLE; m_hIchiD1=INVALID_HANDLE; m_hATR=INVALID_HANDLE; }
+   CSlimeMotherBot() { 
+      m_statsML=NULL;
+      m_stoppedToday=false; m_lastDay=-1; m_lastDealCount=0; m_dayProfit=0; m_dayWins=0; m_dayLosses=0; 
+      m_totalTrades=0; m_totalWins=0; m_totalProfit=0; 
+      m_hIchi=INVALID_HANDLE; m_hIchiD1=INVALID_HANDLE; m_hATR=INVALID_HANDLE;
+      m_trailingActive=false; m_trailingMaxProfit=0; m_trailingTarget=0; m_trailingStep=0;
+      m_isCycleFinished=false; m_lastTradeTime=0;
+   }
    
-   bool Init(string name, string symbol, int magic, ENUM_TIMEFRAMES tf, double vol, double gridPips, double tpRatio) {
+   bool Init(string name, string symbol, int magic, ENUM_TIMEFRAMES tf, double vol, double gridPips, double tpRatio, ENUM_SLIME_STRATEGY strategy) {
       m_name = name;
       m_symbol=symbol; m_magic=magic;
       m_timeframe = tf;
       m_vol = vol;
       m_gridDistPips = gridPips;
       m_tpRatio = tpRatio;
+      m_strategy = strategy;
+      
+      if(StringFind(m_name, "MOTHER") >= 0) m_logPrefix = "[SLIME_MOTHER]";
+      else m_logPrefix = "[SLIME_CHILD_" + IntegerToString(m_magic) + "]";
+      
+      // Init ML Class if Z-Score Strategy
+      if (m_strategy == STRAT_GRID_ZSCORE) {
+         m_statsML = new CStatsML();
+         m_statsML.Init(m_symbol, m_timeframe, InpZScorePeriod);
+         
+         // Setup trailing properties based on volume
+         m_trailingTarget = InpZScoreTrailingTarget * (m_vol / 0.01);
+         m_trailingStep = m_trailingTarget * InpZScoreTrailingStepPct;
+      }
+      
       
       m_trade.SetExpertMagicNumber(m_magic);
-      if(!SymbolSelect(m_symbol,true)) { Print("[SLIME_MOTHERSHIP] Lỗi select ",m_symbol); return false; }
+      if(!SymbolSelect(m_symbol,true)) { Print(m_logPrefix, " Lỗi select ",m_symbol); return false; }
       
-      m_hIchi  = iIchimoku(m_symbol, m_timeframe, InpTenkan, InpKijun, InpSenkou);
-      m_hIchiD1= iIchimoku(m_symbol, PERIOD_D1, InpTenkan, InpKijun, InpSenkou);
-      m_hATR   = iATR(m_symbol, m_timeframe, InpATRPeriod);
-      
-      if(m_hIchi==INVALID_HANDLE||m_hIchiD1==INVALID_HANDLE||m_hATR==INVALID_HANDLE) {
-         Print("[SLIME_MOTHERSHIP] Lỗi tạo indicator cho ",m_symbol); return false;
+      if(m_strategy == STRAT_DCA_ICHIMOKU) {
+         m_hIchi  = iIchimoku(m_symbol, m_timeframe, InpTenkan, InpKijun, InpSenkou);
+         m_hIchiD1= iIchimoku(m_symbol, PERIOD_D1, InpTenkan, InpKijun, InpSenkou);
+         m_hATR   = iATR(m_symbol, m_timeframe, InpATRPeriod);
+         
+         if(m_hIchi==INVALID_HANDLE||m_hIchiD1==INVALID_HANDLE||m_hATR==INVALID_HANDLE) {
+            Print(m_logPrefix, " Lỗi tạo indicator cho ",m_symbol); return false;
+         }
       }
       m_pt  = SymbolInfoDouble(m_symbol, SYMBOL_POINT);
       int d = (int)SymbolInfoInteger(m_symbol, SYMBOL_DIGITS);
       m_p2p = (d==3||d==5)?10.0:1.0;
       
-      Print("[SLIME_MOTHERSHIP] ✓ ", m_symbol, " Magic=", m_magic, " Pt=", m_pt, " P2P=", m_p2p);
+      Print(m_logPrefix, " ✓ ", m_symbol, " Magic=", m_magic, " Pt=", m_pt, " P2P=", m_p2p);
       return true;
    }
    
-   void Deinit() { IndicatorRelease(m_hIchi); IndicatorRelease(m_hIchiD1); IndicatorRelease(m_hATR); }
+   void Deinit() { 
+      if(m_hIchi!=INVALID_HANDLE) IndicatorRelease(m_hIchi);
+      if(m_hIchiD1!=INVALID_HANDLE) IndicatorRelease(m_hIchiD1);
+      if(m_hATR!=INVALID_HANDLE) IndicatorRelease(m_hATR);
+      // if (sp!=INVALID_HANDLE) { IndicatorRelease(sp); ChartRedraw(); } // This 'sp' variable is not defined in CSlimeMotherBot
+      if(m_statsML!=NULL) { delete m_statsML; m_statsML=NULL; }
+   }
    
    //--- ICHIMOKU HELPERS ---
    bool GetIchi(int handle, int shift, double &t, double &k, double &sa, double &sb, double &ch) {
@@ -297,7 +413,7 @@ public:
       double bal=AccountInfoDouble(ACCOUNT_BALANCE), eq=AccountInfoDouble(ACCOUNT_EQUITY);
       if(bal>0&&(bal-eq)/bal*100.0>=InpMaxDrawdownPct) {
          CloseAll(); m_stoppedToday=true;
-         Print("[SLIME_MOTHERSHIP][",m_symbol,"] 🛑 EMERGENCY STOP! DD=",DoubleToString((bal-eq)/bal*100.0,1),"%");
+         Print(m_logPrefix,"[",m_symbol,"] 🛑 EMERGENCY STOP! DD=",DoubleToString((bal-eq)/bal*100.0,1),"%");
          return;
       }
       
@@ -312,10 +428,26 @@ public:
          }
       }
       
+      // Update Lot Size based on Balance if no positions
+      if (bCnt == 0 && sCnt == 0 && InpLotMode == LOT_BALANCE) {
+         double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+         bool isMother = (StringFind(m_name, "MOTHER") >= 0);
+         double step = isMother ? InpMotherBalanceStep : InpChildBalanceStep;
+         double baseVol = isMother ? InpBaseVol : InpChildVol;
+         if (step > 0) {
+            m_vol = CheckVolume((balance / step) * baseVol);
+         }
+         
+         if (m_strategy == STRAT_GRID_ZSCORE) {
+            m_trailingTarget = InpZScoreTrailingTarget * (m_vol / 0.01);
+            m_trailingStep = m_trailingTarget * InpZScoreTrailingStepPct;
+         }
+      }
+      
       // SL After Last
       if(InpSLAfterLast>0) {
          if((bCnt>0&&ask<lowBuy-InpSLAfterLast*m_p2p*m_pt)||(sCnt>0&&bid>highSell+InpSLAfterLast*m_p2p*m_pt)) {
-            CloseAll(); m_stoppedToday=true; Print("[SLIME_MOTHERSHIP][",m_symbol,"] SL After Last hit!"); return;
+            CloseAll(); m_stoppedToday=true; Print(m_logPrefix,"[",m_symbol,"] SL After Last hit!"); return;
          }
       }
       
@@ -327,37 +459,115 @@ public:
       bool hasPos=(bCnt+sCnt>0);
       if(!CheckTime(hasPos,dt)||!CheckDailyProfit(hasPos)) return;
       
-      // DCA
-      double bDist=GetGridDist(bCnt), sDist=GetGridDist(sCnt);
-      double slDist=(InpStopLoss>0)?InpStopLoss*m_p2p*m_pt:0;
-      if(bCnt>0&&bCnt<InpMaxOrders&&ask<(lowBuy-bDist*m_p2p*m_pt)) {
-         double sl=(slDist>0)?ask-slDist:0;
-         m_trade.Buy(GetVol(bCnt+1,bVol), m_symbol, 0, sl, 0, m_name+" DCA B"+(string)(bCnt+1));
-      }
-      if(sCnt>0&&sCnt<InpMaxOrders&&bid>(highSell+sDist*m_p2p*m_pt)) {
-         double sl=(slDist>0)?bid+slDist:0;
-         m_trade.Sell(GetVol(sCnt+1,sVol), m_symbol, 0, sl, 0, m_name+" DCA S"+(string)(sCnt+1));
-      }
-      
-      // First entry
-      if(bCnt==0&&sCnt==0) {
-         if(IsAnyOtherSymbolHavingPosition(m_symbol, m_magic)) return;
-         int sig=GetSignal();
-         if(sig==0) return;
-         int str=CalcStrength(sig>0);
-         double tpDist=(InpFirstTP>0)?InpFirstTP*m_p2p*m_pt:0;
-         string sigName=(sig>0)?"BUY":"SELL";
-         Print("[SLIME_MOTHERSHIP][",m_symbol,"] 📊 Signal=",sigName," Strength=",str,"/5 D1=",GetD1Trend());
-         
-         if(sig==1) {
-            double sl=(slDist>0)?ask-slDist:0, tp=(tpDist>0)?ask+tpDist:0;
-            m_trade.Buy(m_vol, m_symbol, 0, sl, tp, m_name+" "+sigName+" S"+IntegerToString(str));
-            Print("[SLIME_MOTHERSHIP][",m_symbol,"] ✅ BUY @",DoubleToString(ask,(int)SymbolInfoInteger(m_symbol,SYMBOL_DIGITS))," SL=",DoubleToString(sl,2)," TP=",DoubleToString(tp,2));
+      if (m_strategy == STRAT_DCA_ICHIMOKU) {
+         // --- DCA
+         double bDist=GetGridDist(bCnt), sDist=GetGridDist(sCnt);
+         double slDist=(InpStopLoss>0)?InpStopLoss*m_p2p*m_pt:0;
+         if(bCnt>0&&bCnt<InpMaxOrders&&ask<(lowBuy-bDist*m_p2p*m_pt)) {
+            double sl=(slDist>0)?ask-slDist:0;
+            m_trade.Buy(GetVol(bCnt+1,bVol), m_symbol, 0, sl, 0, m_name+" DCA B"+(string)(bCnt+1));
          }
-         else if(sig==-1) {
-            double sl=(slDist>0)?bid+slDist:0, tp=(tpDist>0)?bid-tpDist:0;
-            m_trade.Sell(m_vol, m_symbol, 0, sl, tp, m_name+" "+sigName+" S"+IntegerToString(str));
-            Print("[SLIME_MOTHERSHIP][",m_symbol,"] ✅ SELL @",DoubleToString(bid,(int)SymbolInfoInteger(m_symbol,SYMBOL_DIGITS))," SL=",DoubleToString(sl,2)," TP=",DoubleToString(tp,2));
+         if(sCnt>0&&sCnt<InpMaxOrders&&bid>(highSell+sDist*m_p2p*m_pt)) {
+            double sl=(slDist>0)?bid+slDist:0;
+            m_trade.Sell(GetVol(sCnt+1,sVol), m_symbol, 0, sl, 0, m_name+" DCA S"+(string)(sCnt+1));
+         }
+         
+         // Firt entry
+         if(bCnt==0&&sCnt==0) {
+            int sig=GetSignal();
+            if(sig==0) return;
+            int str=CalcStrength(sig>0);
+            double tpDist=(InpFirstTP>0)?InpFirstTP*m_p2p*m_pt:0;
+            string sigName=(sig>0)?"BUY":"SELL";
+            Print(m_logPrefix,"[",m_symbol,"] 📊 Signal=",sigName," Strength=",str,"/5 D1=",GetD1Trend());
+            
+            if(sig==1) {
+               double sl=(slDist>0)?ask-slDist:0, tp=(tpDist>0)?ask+tpDist:0;
+               m_trade.Buy(m_vol, m_symbol, 0, sl, tp, m_name+" "+sigName+" S"+IntegerToString(str));
+               Print(m_logPrefix,"[",m_symbol,"] ✅ BUY @",DoubleToString(ask,(int)SymbolInfoInteger(m_symbol,SYMBOL_DIGITS))," SL=",DoubleToString(sl,2)," TP=",DoubleToString(tp,2));
+            }
+            else if(sig==-1) {
+               double sl=(slDist>0)?bid+slDist:0, tp=(tpDist>0)?bid-tpDist:0;
+               m_trade.Sell(m_vol, m_symbol, 0, sl, tp, m_name+" "+sigName+" S"+IntegerToString(str));
+               Print(m_logPrefix,"[",m_symbol,"] ✅ SELL @",DoubleToString(bid,(int)SymbolInfoInteger(m_symbol,SYMBOL_DIGITS))," SL=",DoubleToString(sl,2)," TP=",DoubleToString(tp,2));
+            }
+         }
+      }
+      else if (m_strategy == STRAT_GRID_ZSCORE) {
+         // --- Z-SCORE ML LOGIC ---
+         if(m_statsML == NULL) return;
+         m_statsML.Update();
+         double zScore = m_statsML.GetZScore();
+         
+         // Logic Hysteresis
+         if(m_isCycleFinished) {
+            if(MathAbs(zScore) < 0.8) {
+               m_isCycleFinished = false;
+               Print(m_logPrefix,"[",m_symbol,"] Reset Z-Score về ", zScore, " - Sẵn sàng chu kỳ mới.");
+            } else return;
+         }
+         
+         int gridCount = bCnt + sCnt;
+         if (gridCount == 0) {
+            if(TimeCurrent() - m_lastTradeTime < 10) return;
+            
+            if(zScore > InpZScoreEntry) {
+               m_trade.Sell(m_vol, m_symbol, 0,0,0, m_name+" GRID ZS S");
+               m_lastTradeTime = TimeCurrent();
+            }
+            else if(zScore < -InpZScoreEntry) {
+               m_trade.Buy(m_vol, m_symbol, 0,0,0, m_name+" GRID ZS B");
+               m_lastTradeTime = TimeCurrent();
+            }
+         }
+         else {
+            double floatProfit = GetFloating();
+            if(floatProfit < 0) {
+               long type = -1;
+               double lastPrice = 0;
+               for(int i=PositionsTotal()-1; i>=0; i--) {
+                  ulong tk = PositionGetTicket(i);
+                  if(PositionGetString(POSITION_SYMBOL) == m_symbol && PositionGetInteger(POSITION_MAGIC) == m_magic) {
+                     type = PositionGetInteger(POSITION_TYPE);
+                     double p = PositionGetDouble(POSITION_PRICE_OPEN);
+                     if(lastPrice == 0) lastPrice = p;
+                     if(type == POSITION_TYPE_BUY) { if(p < lastPrice) lastPrice = p; }
+                     else { if(p > lastPrice) lastPrice = p; }
+                  }
+               }
+               
+               if(gridCount < InpMaxOrders && lastPrice != 0 && TimeCurrent() - m_lastTradeTime >= 10) {
+                  double current = (type == POSITION_TYPE_BUY) ? ask : bid;
+                  double dist = (type == POSITION_TYPE_BUY) ? (lastPrice - current) : (current - lastPrice);
+                  double reqDist = m_gridDistPips * m_p2p * m_pt;
+                  
+                  if(dist >= reqDist) {
+                     if(type == POSITION_TYPE_BUY) m_trade.Buy(m_vol, m_symbol, 0,0,0, m_name+" GRID ZS B"+(string)(gridCount+1));
+                     else m_trade.Sell(m_vol, m_symbol, 0,0,0, m_name+" GRID ZS S"+(string)(gridCount+1));
+                     m_lastTradeTime = TimeCurrent();
+                  }
+               }
+            }
+            // Logic Trailing Exit
+            if(!m_trailingActive) {
+               if(floatProfit >= m_trailingTarget) {
+                  m_trailingActive = true;
+                  m_trailingMaxProfit = floatProfit;
+                  Print(m_logPrefix,"[",m_symbol,"] Bật Trailing Target=", m_trailingTarget);
+               }
+            } else {
+               if(floatProfit > m_trailingMaxProfit) m_trailingMaxProfit = floatProfit;
+               
+               if(floatProfit < m_trailingMaxProfit - m_trailingStep) {
+                  Print(m_logPrefix,"[",m_symbol,"] 💰 Trailing Exit Max=", m_trailingMaxProfit, " Closed=", floatProfit);
+                  CloseAll();
+                  m_trailingActive = false;
+                  m_trailingMaxProfit = 0;
+                  m_isCycleFinished = true; // Wait for Z-Score reset
+               }
+               
+               if(floatProfit < 0) { m_trailingActive = false; m_trailingMaxProfit = 0; }
+            }
          }
       }
    }
@@ -369,7 +579,7 @@ public:
       double avg=prod/vol;
       if(InpBreakevenStart>0&&cnt>=InpBreakevenStart) {
          double pp=(type==POSITION_TYPE_BUY)?(price-avg)/(m_pt*m_p2p):(avg-price)/(m_pt*m_p2p);
-         if(pp>=InpBreakevenPips) { CloseByType(type); Print("[SLIME_MOTHERSHIP][",m_symbol,"] 💰 Hòa vốn ",(type==POSITION_TYPE_BUY)?"BUY":"SELL"," +",DoubleToString(pp,1),"pips"); return; }
+         if(pp>=InpBreakevenPips) { CloseByType(type); Print(m_logPrefix,"[",m_symbol,"] 💰 Hòa vốn ",(type==POSITION_TYPE_BUY)?"BUY":"SELL"," +",DoubleToString(pp,1),"pips"); return; }
       }
       if(cnt>=InpMergeStart) {
          double tpPips = m_gridDistPips * m_tpRatio;
@@ -405,7 +615,7 @@ public:
                m_dayProfit+=profit; m_totalProfit+=profit; m_totalTrades++;
                if(profit>=0) { m_dayWins++; m_totalWins++; } else { m_dayLosses++; }
                string dtype=(HistoryDealGetInteger(tk,DEAL_TYPE)==DEAL_TYPE_BUY)?"SELL→CLOSE":"BUY→CLOSE";
-               Print("[SLIME_MOTHERSHIP][",m_symbol,"] ",dtype," Vol=",DoubleToString(vol,2)," P/L=",DoubleToString(profit,2),
+               Print(m_logPrefix,"[",m_symbol,"] ",dtype," Vol=",DoubleToString(vol,2)," P/L=",DoubleToString(profit,2),
                      " | Day: W",m_dayWins,"/L",m_dayLosses," $",DoubleToString(m_dayProfit,2),
                      " | Total: ",m_totalTrades," trades WR=",GetWinRatePct(),"%");
             }
@@ -418,7 +628,7 @@ public:
       int totalDay=m_dayWins+m_dayLosses;
       double wr=(totalDay>0)?(m_dayWins*100.0/totalDay):0;
       Print("═══════════════════════════════════════════════════");
-      Print("[SLIME_MOTHERSHIP][",m_symbol,"] 📅 KẾT THÚC NGÀY ",m_lastDay);
+      Print(m_logPrefix,"[",m_symbol,"] 📅 KẾT THÚC NGÀY ",m_lastDay);
       Print("  Trades: ",totalDay," | Wins: ",m_dayWins," | Losses: ",m_dayLosses," | WinRate: ",DoubleToString(wr,1),"%");
       Print("  P/L Ngày: $",DoubleToString(m_dayProfit,2)," | P/L Tổng: $",DoubleToString(m_totalProfit,2));
       Print("  Tổng trades: ",m_totalTrades," | WR Tổng: ",GetWinRatePct(),"%");
@@ -482,17 +692,35 @@ public:
    int GetDayWins() { return m_dayWins; }
    int GetDayLosses() { return m_dayLosses; }
    int GetTotalTrades() { return m_totalTrades; }
+   int GetMagic() { return m_magic; }
+   ENUM_SLIME_STRATEGY GetStrategy() { return m_strategy; }
+   ENUM_TIMEFRAMES GetTimeframe() { return m_timeframe; }
 };
 
 //+------------------------------------------------------------------+
 //| GLOBAL                                                           |
 //+------------------------------------------------------------------+
+struct SChildStat {
+   int magic;
+   string name;
+   string symbol;
+   string tf;
+   string strategy;
+   double grid;
+   double totalProfit;
+   bool isAlive;
+   datetime spawnTime;
+};
+SChildStat g_childLogs[];
+
 CSlimeMotherBot *motherBots[];
 CSlimeMotherBot *childBots[];
 string gSymbols[];
 string gChildTFs[];
 
 int g_maxChildBots = 0;
+int g_totalSpawned = 0;
+int g_pnlSpawns = 0;
 double g_totalChildProfit = 0;
 
 ENUM_TIMEFRAMES StrToTF(string s) {
@@ -518,7 +746,11 @@ void CalcGlobalProfit() {
       if(HistoryDealGetInteger(t,DEAL_ENTRY)==DEAL_ENTRY_OUT) {
          double pnl = HistoryDealGetDouble(t,DEAL_PROFIT)+HistoryDealGetDouble(t,DEAL_SWAP)+HistoryDealGetDouble(t,DEAL_COMMISSION);
          if(magic>=mn&&magic<mx) mp+=pnl;
-         else if(magic>=cMn&&magic<cMx) cp+=pnl;
+         else if(magic>=cMn&&magic<cMx) {
+            cp+=pnl;
+            // Thuế nộp cho Mother
+            if(pnl > 0) mp += pnl * InpTaxRate;
+         }
       }
    }
    g_GlobalProfit=mp;
@@ -546,31 +778,93 @@ bool IsAnyOtherSymbolHavingPosition(string currentSymbol, int myMagic) {
    return false;
 }
 
-void ManageSpawning() {
+void SpawnChild() {
    int currentChildren = ArraySize(childBots);
-   if(currentChildren > g_maxChildBots) g_maxChildBots = currentChildren;
+   if(currentChildren >= InpMaxSlimes) return;
    
-   if(currentChildren < InpMaxSlimes) {
-      static int totalSpawned = 0;
-      // Dùng InpSpawnThreshold làm mốc đẻ. Tạm đẻ 1 con mỗi $InpSpawnThreshold lãi từ Mother
-      if(g_GlobalProfit >= (totalSpawned + 1) * InpSpawnThreshold) {
-         ArrayResize(childBots, currentChildren + 1);
-         
-         int tfIdx = MathRand() % ArraySize(gChildTFs);
-         ENUM_TIMEFRAMES tf = StrToTF(gChildTFs[tfIdx]);
-         double grid = InpChildMinGrid + MathRand() % (InpChildMaxGrid - InpChildMinGrid + 1);
-         
-         int symIdx = MathRand() % ArraySize(gSymbols);
-         string chosenSymbol = gSymbols[symIdx];
-         
-         childBots[currentChildren] = new CSlimeMotherBot();
-         int cMagic = InpMagicBase + 1000 + totalSpawned;
-         childBots[currentChildren].Init("CHILD#"+(string)(totalSpawned+1), chosenSymbol, cMagic, tf, InpChildVol, grid, InpChildTPRatio);
-         
-         totalSpawned++;
-         double totalAll = g_GlobalProfit + g_totalChildProfit;
-         Print("[SLIME_MOTHERSHIP] 🐣 Đẻ Slime #", totalSpawned, " | Asset:", chosenSymbol, " | TF:", EnumToString(tf), " | Grid:", grid, "pips");
-         Print("[STATISTICS] Active Slimes: ", currentChildren+1, " | Max Slimes: ", g_maxChildBots, " | Child PnL: $", DoubleToString(g_totalChildProfit,2), " | Mother PnL: $", DoubleToString(g_GlobalProfit,2), " | Total All: $", DoubleToString(totalAll,2));
+   int maxTries = 50;
+   bool foundUnique = false;
+   ENUM_TIMEFRAMES tf = PERIOD_CURRENT;
+   string chosenSymbol = "";
+   ENUM_SLIME_STRATEGY cStrat = STRAT_DCA_ICHIMOKU;
+   
+   for(int rep = 0; rep < maxTries; rep++) {
+      int tfIdx = MathRand() % ArraySize(gChildTFs);
+      tf = StrToTF(gChildTFs[tfIdx]);
+      
+      int symIdx = MathRand() % ArraySize(gSymbols);
+      chosenSymbol = gSymbols[symIdx];
+      
+      cStrat = (ENUM_SLIME_STRATEGY)(MathRand() % 2);
+      
+      bool isDupe = false;
+      if (cStrat == STRAT_GRID_ZSCORE) {
+         for(int i=0; i<ArraySize(childBots); i++) {
+            if(CheckPointer(childBots[i])!=POINTER_INVALID) {
+                if(childBots[i].GetStrategy() == STRAT_GRID_ZSCORE && 
+                   childBots[i].GetSymbol() == chosenSymbol && 
+                   childBots[i].GetTimeframe() == tf) {
+                   isDupe = true;
+                   break;
+                }
+            }
+         }
+      }
+      
+      if(!isDupe) {
+         foundUnique = true;
+         break;
+      }
+   }
+   
+   if(!foundUnique) {
+      Print("[SLIME_MOTHERSHIP] Không tìm ra Symbol & TF trống (không trùng) sau ", maxTries, " lần thử.");
+      return;
+   }
+   
+   ArrayResize(childBots, currentChildren + 1);
+   
+   double grid = 0;
+   string stratName = "UNKNOWN";
+   
+   if (cStrat == STRAT_DCA_ICHIMOKU) {
+      grid = InpChildMinGrid + MathRand() % (InpChildMaxGrid - InpChildMinGrid + 1);
+      stratName = "DCA";
+   } else if (cStrat == STRAT_GRID_ZSCORE) {
+      grid = InpChildMinGridZScore + MathRand() % (InpChildMaxGridZScore - InpChildMinGridZScore + 1);
+      stratName = "ZSCORE";
+   }
+   
+   childBots[currentChildren] = new CSlimeMotherBot();
+   int cMagic = InpMagicBase + 1000 + g_totalSpawned;
+   childBots[currentChildren].Init("CHILD#"+(string)(g_totalSpawned+1), chosenSymbol, cMagic, tf, InpChildVol, grid, InpChildTPRatio, cStrat);
+   
+   g_totalSpawned++;
+   
+   int idx = ArraySize(g_childLogs);
+   ArrayResize(g_childLogs, idx + 1);
+   g_childLogs[idx].magic = cMagic;
+   g_childLogs[idx].name = "CHILD#" + (string)g_totalSpawned;
+   g_childLogs[idx].symbol = chosenSymbol;
+   g_childLogs[idx].tf = EnumToString(tf);
+   g_childLogs[idx].strategy = stratName;
+   g_childLogs[idx].grid = grid;
+   g_childLogs[idx].totalProfit = 0;
+   g_childLogs[idx].isAlive = true;
+   g_childLogs[idx].spawnTime = TimeCurrent();
+   
+   if(currentChildren + 1 > g_maxChildBots) g_maxChildBots = currentChildren + 1;
+   
+   double totalAll = g_GlobalProfit + g_totalChildProfit;
+   Print("[SLIME_MOTHERSHIP] 🐣 Đẻ Slime #", g_totalSpawned, " | Asset:", chosenSymbol, " | TF:", EnumToString(tf), " | Grid:", grid, "pips | Strat:", stratName);
+   Print("[STATISTICS] Active Slimes: ", currentChildren+1, " | Max Slimes: ", g_maxChildBots, " | Child PnL: $", DoubleToString(g_totalChildProfit,2), " | Mother PnL: $", DoubleToString(g_GlobalProfit,2), " | Total All: $", DoubleToString(totalAll,2));
+}
+
+void ManageSpawning() {
+   if(ArraySize(childBots) < InpMaxSlimes) {
+      if(g_GlobalProfit >= (g_pnlSpawns + 1) * InpSpawnThreshold) {
+         SpawnChild();
+         g_pnlSpawns++;
       }
    }
 }
@@ -583,6 +877,15 @@ void ManageChildrenHealth() {
          // Thu hồi bot con nếu Equity dưới mức tối thiểu không đủ duy trì
          if(childEquity <= InpChildMinEquity) {
             Print("[SLIME_MOTHERSHIP] ♻️ Thu hồi Slime do Equity quá thấp ($", DoubleToString(childEquity, 2), "): Symbol ", childBots[i].GetSymbol());
+            
+            int cMagic = childBots[i].GetMagic();
+            for(int s=0; s<ArraySize(g_childLogs); s++) {
+               if(g_childLogs[s].magic == cMagic) {
+                  g_childLogs[s].isAlive = false;
+                  break;
+               }
+            }
+            
             childBots[i].CloseAll();
             delete childBots[i];
             
@@ -613,9 +916,18 @@ int OnInit() {
    for(int i=0;i<s;i++) {
       StringTrimLeft(gSymbols[i]); StringTrimRight(gSymbols[i]);
       motherBots[i]=new CSlimeMotherBot();
-      if(motherBots[i].Init("MOTHER", gSymbols[i],InpMagicBase+i, InpTimeframe, InpBaseVol, InpGridDist, 1.0)) Print("[SLIME_MOTHERSHIP] ✓ Bot [",gSymbols[i],"] ready");
+      
+      double motherGrid = InpGridDist;
+      if (InpMotherStrategy == STRAT_GRID_ZSCORE) {
+         motherGrid = InpMotherMinGridZScore + MathRand() % (InpMotherMaxGridZScore - InpMotherMinGridZScore + 1);
+      }
+      
+      if(motherBots[i].Init("MOTHER", gSymbols[i],InpMagicBase+i, InpTimeframe, InpBaseVol, motherGrid, 1.0, InpMotherStrategy)) Print("[SLIME_MOTHERSHIP] ✓ Bot [",gSymbols[i],"] ready with strat ", EnumToString(InpMotherStrategy));
       else Print("[SLIME_MOTHERSHIP] ✗ Bot [",gSymbols[i],"] FAILED");
    }
+   
+   for(int i=0; i<InpInitialSlimes; i++) SpawnChild();
+   
    CreatePanel();
    return INIT_SUCCEEDED;
 }
@@ -632,10 +944,22 @@ void OnTimer() {
    ManageSpawning();
    ManageChildrenHealth();
    
-   for(int i=0;i<ArraySize(motherBots);i++) if(CheckPointer(motherBots[i])!=POINTER_INVALID) motherBots[i].Processing();
+   if(InpMotherTrade) {
+      for(int i=0;i<ArraySize(motherBots);i++) if(CheckPointer(motherBots[i])!=POINTER_INVALID) motherBots[i].Processing();
+   }
    for(int i=0;i<ArraySize(childBots);i++) if(CheckPointer(childBots[i])!=POINTER_INVALID) childBots[i].Processing();
    
    UpdatePanel();
+}
+
+void OnTick() {
+   CalcGlobalProfit();
+   ManageChildrenHealth();
+   
+   if(InpMotherTrade) {
+      for(int i=0;i<ArraySize(motherBots);i++) if(CheckPointer(motherBots[i])!=POINTER_INVALID) motherBots[i].Processing();
+   }
+   for(int i=0;i<ArraySize(childBots);i++) if(CheckPointer(childBots[i])!=POINTER_INVALID) childBots[i].Processing();
 }
 
 //+------------------------------------------------------------------+
@@ -653,7 +977,7 @@ void CreateLabel(string name, string text, int x, int y, color clr, int sz, bool
 }
 
 void CreatePanel() {
-   int x=10, y=30, w=360, h=140+ArraySize(motherBots)*22;
+   int x=10, y=30, w=360, h=165+ArraySize(motherBots)*22;
    ObjectCreate(0,"SG_BG",OBJ_RECTANGLE_LABEL,0,0,0);
    ObjectSetInteger(0,"SG_BG",OBJPROP_XDISTANCE,x);
    ObjectSetInteger(0,"SG_BG",OBJPROP_YDISTANCE,y);
@@ -678,9 +1002,10 @@ void CreatePanel() {
       CreateLabel(p+"_WR", "--%",          x+275, ry, clrGray,  8);
    }
    
-   CreateLabel("SG_CHILD_HDR","--- CHILD SLIMES INFO ---",x+10,y+h-65,C'200,180,100',8);
-   CreateLabel("SG_CHILD_STATS","",x+10,y+h-45,clrWhite,8);
-   CreateLabel("SG_GLOBAL","Global: $0.00 | Float: $0.00",x+10,y+h-20,C'120,120,140',8);
+   CreateLabel("SG_CHILD_HDR","--- CHILD SLIMES INFO ---",x+10,y+h-90,C'200,180,100',8);
+   CreateLabel("SG_CHILD_STATS","",x+10,y+h-70,clrWhite,8);
+   CreateLabel("SG_GLOBAL","Global: $0.00 | Float: $0.00",x+10,y+h-45,C'120,120,140',8);
+   CreateLabel("SG_WITHDRAW","",x+10,y+h-25,C'100,255,100',9); // Green text for withdrawing
 }
 
 void UpdatePanel() {
@@ -705,10 +1030,22 @@ void UpdatePanel() {
                                     ArraySize(childBots), g_maxChildBots, g_totalChildProfit);
    ObjectSetString(0,"SG_CHILD_STATS",OBJPROP_TEXT, childStats);
    
-   double totalAll = g_GlobalProfit + g_totalChildProfit;
-   ObjectSetString(0,"SG_GLOBAL",OBJPROP_TEXT,
-      "Mother P/L: $"+DoubleToString(g_GlobalProfit,2)+" | Total PnL: $"+DoubleToString(totalAll,2)+" | All Float: $"+DoubleToString(g_GlobalFloating,2));
-   ObjectSetInteger(0,"SG_GLOBAL",OBJPROP_COLOR,(totalAll+g_GlobalFloating>=0)?C'0,200,120':C'255,80,80');
+   string globalStats = StringFormat("Mother P/L: $%.2f | Total PnL: $%.2f | All Float: $%.2f", g_GlobalProfit, g_GlobalProfit + g_totalChildProfit, g_GlobalFloating);
+   ObjectSetString(0,"SG_GLOBAL",OBJPROP_TEXT, globalStats);
+   ObjectSetInteger(0,"SG_GLOBAL",OBJPROP_COLOR,(g_GlobalProfit + g_totalChildProfit + g_GlobalFloating>=0)?C'0,200,120':C'255,80,80');
+
+   int activeChildren = 0;
+   for(int i=0; i<ArraySize(childBots); i++) {
+      if(CheckPointer(childBots[i]) != POINTER_INVALID) activeChildren++;
+   }
+   
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double safeWithdraw = equity - InpMotherCapital - (activeChildren * InpChildCapital);
+   if (safeWithdraw < 0) safeWithdraw = 0;
+   
+   string safeTxt = StringFormat("💰 Safe Withdraw: $%.2f", safeWithdraw);
+   ObjectSetString(0,"SG_WITHDRAW",OBJPROP_TEXT, safeTxt);
+   
    ChartRedraw(0);
 }
 //+------------------------------------------------------------------+

@@ -132,7 +132,6 @@ dailyTarget = 1000.0
 2. Kéo EA từ Navigator → Chart
 
 3. Cài đặt parameters:
-
    - Nếu tài khoản $500 → `accountPer500 = 500`
    - Nếu tài khoản $1000 → `accountPer500 = 500` (0.02 lot base)
    - Nếu tài khoản $5000 → `accountPer500 = 500` (0.10 lot base)
@@ -354,3 +353,5 @@ Nếu có vấn đề:
 3. Báo lỗi với screenshot
 
 **Happy Trading! 🚀💰📈**
+
+Hiện tại có vấn đề, bot con trong quá trình trade tôi nghĩ nó bị âm quá mức vốn của nó và lấn sang bot mẹ, tôi cần cắt nếu tổng lệnh âm của bot đó > min tài khoản bot con, nó sẽ theo tick để xét chứ không phải đợi hết nến nếu vậy thì nó sẽ âm qua cả vốn của mẹ

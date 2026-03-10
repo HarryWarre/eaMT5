@@ -277,10 +277,14 @@ public:
       int bCnt=0, sCnt=0; double bVol=0,sVol=0,bProd=0,sProd=0,lowBuy=0,highSell=0;
       for(int i=PositionsTotal()-1;i>=0;i--) {
          ulong tk=PositionGetTicket(i);
-         if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_MAGIC)==m_magic) {
-            double v=PositionGetDouble(POSITION_VOLUME), op=PositionGetDouble(POSITION_PRICE_OPEN);
-            if(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY) { bCnt++; bVol+=v; bProd+=op*v; if(lowBuy==0||op<lowBuy) lowBuy=op; }
-            else { sCnt++; sVol+=v; sProd+=op*v; if(highSell==0||op>highSell) highSell=op; }
+         if(PositionGetString(POSITION_SYMBOL)==m_symbol) {
+            long m_magic_pos = PositionGetInteger(POSITION_MAGIC);
+            string m_comment = PositionGetString(POSITION_COMMENT);
+            if(m_magic_pos == m_magic || StringFind(m_comment, "SG ") == 0) {
+               double v=PositionGetDouble(POSITION_VOLUME), op=PositionGetDouble(POSITION_PRICE_OPEN);
+               if(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY) { bCnt++; bVol+=v; bProd+=op*v; if(lowBuy==0||op<lowBuy) lowBuy=op; }
+               else { sCnt++; sVol+=v; sProd+=op*v; if(highSell==0||op>highSell) highSell=op; }
+            }
          }
       }
       
@@ -353,16 +357,25 @@ public:
          double tp=(type==POSITION_TYPE_BUY)?avg+tpPips*m_p2p*m_pt:avg-tpPips*m_p2p*m_pt;
          for(int i=PositionsTotal()-1;i>=0;i--) {
             ulong tk=PositionGetTicket(i);
-            if(PositionGetInteger(POSITION_MAGIC)==m_magic&&PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_TYPE)==type)
-               if(MathAbs(PositionGetDouble(POSITION_TP)-tp)>m_pt) m_trade.PositionModify(tk,PositionGetDouble(POSITION_SL),tp);
+            if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_TYPE)==type) {
+               long m_magic_pos = PositionGetInteger(POSITION_MAGIC);
+               string m_comment = PositionGetString(POSITION_COMMENT);
+               if(m_magic_pos == m_magic || StringFind(m_comment, "SG ") == 0) {
+                  if(MathAbs(PositionGetDouble(POSITION_TP)-tp)>m_pt) m_trade.PositionModify(tk,PositionGetDouble(POSITION_SL),tp);
+               }
+            }
          }
       } else {
          for(int i=PositionsTotal()-1;i>=0;i--) {
             ulong tk=PositionGetTicket(i);
-            if(PositionGetInteger(POSITION_MAGIC)==m_magic&&PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_TYPE)==type) {
-               double op=PositionGetDouble(POSITION_PRICE_OPEN);
-               double trg=(type==POSITION_TYPE_BUY)?op+InpSingleTP*m_p2p*m_pt:op-InpSingleTP*m_p2p*m_pt;
-               if(MathAbs(PositionGetDouble(POSITION_TP)-trg)>m_pt) m_trade.PositionModify(tk,PositionGetDouble(POSITION_SL),trg);
+            if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_TYPE)==type) {
+               long m_magic_pos = PositionGetInteger(POSITION_MAGIC);
+               string m_comment = PositionGetString(POSITION_COMMENT);
+               if(m_magic_pos == m_magic || StringFind(m_comment, "SG ") == 0) {
+                  double op=PositionGetDouble(POSITION_PRICE_OPEN);
+                  double trg=(type==POSITION_TYPE_BUY)?op+InpSingleTP*m_p2p*m_pt:op-InpSingleTP*m_p2p*m_pt;
+                  if(MathAbs(PositionGetDouble(POSITION_TP)-trg)>m_pt) m_trade.PositionModify(tk,PositionGetDouble(POSITION_SL),trg);
+               }
             }
          }
       }
@@ -402,8 +415,8 @@ public:
    }
    
    //--- HELPERS ---
-   void CloseByType(long type) { for(int i=PositionsTotal()-1;i>=0;i--) { ulong tk=PositionGetTicket(i); if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_MAGIC)==m_magic&&PositionGetInteger(POSITION_TYPE)==type) m_trade.PositionClose(tk); } }
-   void CloseAll() { for(int i=PositionsTotal()-1;i>=0;i--) { ulong tk=PositionGetTicket(i); if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_MAGIC)==m_magic) m_trade.PositionClose(tk); } }
+   void CloseByType(long type) { for(int i=PositionsTotal()-1;i>=0;i--) { ulong tk=PositionGetTicket(i); if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_TYPE)==type) { long mag=PositionGetInteger(POSITION_MAGIC); string cmt=PositionGetString(POSITION_COMMENT); if(mag==m_magic||StringFind(cmt,"SG ")==0) m_trade.PositionClose(tk); } } }
+   void CloseAll() { for(int i=PositionsTotal()-1;i>=0;i--) { ulong tk=PositionGetTicket(i); if(PositionGetString(POSITION_SYMBOL)==m_symbol) { long mag=PositionGetInteger(POSITION_MAGIC); string cmt=PositionGetString(POSITION_COMMENT); if(mag==m_magic||StringFind(cmt,"SG ")==0) m_trade.PositionClose(tk); } } }
    
    double GetGridDist(int cnt) {
       if(InpDcaMethod==DCA_2PHASE) return (cnt<InpPhase1Orders)?InpPhase1Dist:InpPhase2Dist;
@@ -448,9 +461,9 @@ public:
    
    // Panel getters
    string GetSymbol() { return m_symbol; }
-   int GetBuyCount() { int c=0; for(int i=PositionsTotal()-1;i>=0;i--){ulong tk=PositionGetTicket(i);if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_MAGIC)==m_magic&&PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY)c++;}return c; }
-   int GetSellCount() { int c=0; for(int i=PositionsTotal()-1;i>=0;i--){ulong tk=PositionGetTicket(i);if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_MAGIC)==m_magic&&PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_SELL)c++;}return c; }
-   double GetFloating() { double p=0; for(int i=PositionsTotal()-1;i>=0;i--){ulong tk=PositionGetTicket(i);if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_MAGIC)==m_magic)p+=PositionGetDouble(POSITION_PROFIT);}return p; }
+   int GetBuyCount() { int c=0; for(int i=PositionsTotal()-1;i>=0;i--){ulong tk=PositionGetTicket(i);if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY){ long mag=PositionGetInteger(POSITION_MAGIC); string cmt=PositionGetString(POSITION_COMMENT); if(mag==m_magic||StringFind(cmt,"SG ")==0) c++;}}return c; }
+   int GetSellCount() { int c=0; for(int i=PositionsTotal()-1;i>=0;i--){ulong tk=PositionGetTicket(i);if(PositionGetString(POSITION_SYMBOL)==m_symbol&&PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_SELL){ long mag=PositionGetInteger(POSITION_MAGIC); string cmt=PositionGetString(POSITION_COMMENT); if(mag==m_magic||StringFind(cmt,"SG ")==0) c++;}}return c; }
+   double GetFloating() { double p=0; for(int i=PositionsTotal()-1;i>=0;i--){ulong tk=PositionGetTicket(i);if(PositionGetString(POSITION_SYMBOL)==m_symbol){ long mag=PositionGetInteger(POSITION_MAGIC); string cmt=PositionGetString(POSITION_COMMENT); if(mag==m_magic||StringFind(cmt,"SG ")==0) p+=PositionGetDouble(POSITION_PROFIT);}}return p; }
    string GetTrendText() { int d=GetD1Trend(); return (d>0)?"▲":(d<0)?"▼":"▬"; }
    string GetWinRatePct() { return (m_totalTrades>0)?DoubleToString(m_totalWins*100.0/m_totalTrades,0):"--"; }
    double GetDayProfit() { return m_dayProfit; }

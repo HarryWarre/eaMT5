@@ -39,6 +39,13 @@ enum ENUM_DCA_LEVEL {
    DCA_KUMO_DEEP = 4    // Pullback tới Senkou Span 2 (Ch.10: phòng tuyến cuối)
 };
 
+// Chế độ Hedge (đảo chiều rổ chính)
+enum ENUM_HEDGE_TYPE {
+   HEDGE_NONE          = 0, // Không dùng
+   HEDGE_FULL_VOLUME   = 1, // Hedge 100% Volume
+   HEDGE_AUTO_RECOVERY = 2  // Auto Hedge (Hòa vốn tại TP)
+};
+
 enum ENUM_MTF_MODE {
    MTF_SINGLE = 0,   // 1 khung thời gian (nhanh nhất)
    MTF_TRIPLE = 1    // 3 khung (M5+M15+H1, chuẩn)
@@ -88,6 +95,7 @@ input group "========= TỈA LỆNH & HEDGE ========="
 input bool   InpEnableTrim       = true;    // Bật tỉa lệnh Z-Score
 input bool   InpEnableHedgeMode  = true;    // Bật Hedge đảo chiều (Sanyaku)
 input bool   InpHedgeWaitKumoBreak = true;  // Hedge chờ giá thoát mây HighTF
+input ENUM_HEDGE_TYPE InpHedgeType = HEDGE_NONE; // Chế độ Hedge khi đảo trend
 input bool   InpEnableTrimTotalBE= true;    // Tính Lot tỉa để Gồng Hòa Vốn Tổng
 input bool   InpHedgeMergeVolume = false;   // Gộp số lượng lệnh Hedge và Chính lấy mốc Tỉa
 input int    InpTrimAfterDCA     = 2;       // Tỉa sau DCA level X
@@ -1028,6 +1036,11 @@ void ManageTrim() {
    
    // Tự reset nếu lệnh tỉa chạm mức TP rổ chính và đóng tự động
    if(g_trimActive && CountPositions(0, true) == 0) {
+      if(InpHedgeType != HEDGE_NONE) {
+         CloseAllPositions();
+         g_direction = 0; g_dcaLevel = 0; g_lastDCATime = 0; g_lastPyramidTime = 0;
+         Print("⚖️ HEDGE COMPLETED: Closing all positions (Main + Hedge)");
+      }
       g_trimActive = false; g_trimDirection = 0; g_trimDcaLevel = 0; g_lastTrimTime = 0;
    }
    
@@ -1058,13 +1071,24 @@ void ManageTrim() {
       
       // 1. Kiểm tra Hedge Mode (Sanyaku Reversal)
       if(InpEnableHedgeMode) {
-         double price = iClose(_Symbol, InpBaseTF, 1);
          if(!IsKijunFlat(m_ichiBase, InpKijunFlatBars) && !m_session.IsNewsTime()) {
-            int sanyaku = SanyakuState(m_ichiBase, price, InpBaseTF);
-            if(g_direction == 1 && sanyaku == -1) {
-               g_trimDirection = -1; trigger = true; triggerSource = "HEDGE";
-            } else if(g_direction == -1 && sanyaku == 1) {
-               g_trimDirection = 1; trigger = true; triggerSource = "HEDGE";
+            // Đảo trend H1 -> Mở Hedge (Bất đối xứng theo yêu cầu)
+            if(InpMTFMode == MTF_TRIPLE) {
+               double priceH = iClose(_Symbol, InpHighTF, 1);
+               int sanyakuH = SanyakuState(m_ichiHigh, priceH, InpHighTF);
+               if(g_direction == 1 && sanyakuH == -1) {
+                  g_trimDirection = -1; trigger = true; triggerSource = "HEDGE";
+               } else if(g_direction == -1 && sanyakuH == 1) {
+                  g_trimDirection = 1; trigger = true; triggerSource = "HEDGE";
+               }
+            } else {
+               double priceB = iClose(_Symbol, InpBaseTF, 1);
+               int sanyakuB = SanyakuState(m_ichiBase, priceB, InpBaseTF);
+               if(g_direction == 1 && sanyakuB == -1) {
+                  g_trimDirection = -1; trigger = true; triggerSource = "HEDGE";
+               } else if(g_direction == -1 && sanyakuB == 1) {
+                  g_trimDirection = 1; trigger = true; triggerSource = "HEDGE";
+               }
             }
          }
          
@@ -1107,6 +1131,29 @@ void ManageTrim() {
          // Lấy Lot đầu tiên dựa theo hàm phục hồi tổng hợp (nếu có TotalBE) hoặc Lot gốc
          double recoveryLot = CalculateRecoveryLot(true, price, tpPips);
          double initLot = AdjustLots(MathMax(recoveryLot, InpEntryLot));
+         
+         if(triggerSource == "HEDGE") {
+            if(InpHedgeType == HEDGE_FULL_VOLUME) {
+               double totalVolMain = GetTotalLots(false);
+               initLot = AdjustLots(totalVolMain);
+            }
+            else if(InpHedgeType == HEDGE_AUTO_RECOVERY) {
+               double vMain = GetTotalLots(false);
+               double avgMain = GetAvgPrice(false);
+               double tpDist = tpPips * g_point * g_p2p;
+               double tpPrice = (g_trimDirection == 1) ? ask + tpDist : bid - tpDist;
+               
+               double gapMain = MathAbs(avgMain - tpPrice);
+               double distHedge = tpDist;
+               
+               if(distHedge > 0) {
+                  // V_hedge = (gapMain * vMain) / distHedge + small profit buffer
+                  double recLot = (gapMain * vMain / (g_point * g_p2p) + InpTrimBEPips * vMain) / tpPips;
+                  initLot = AdjustLots(recLot);
+               }
+            }
+            if(initLot < InpEntryLot) initLot = InpEntryLot;
+         }
          // Phải lấy TP cách điểm vào lệnh chuẩn tpDist Price
          double tp = (g_trimDirection == 1) ? ask + tpDist : bid - tpDist;
          string comment = "PX TRIM ENTRY L1";
@@ -1280,17 +1327,29 @@ void UpdateMergedTP(bool isTrim) {
    
    if(tpHit) {
       double profit = GetBasketProfit(isTrim);
-      int count = CountPositions(0, isTrim);
-      CloseBasket(isTrim);
-      g_cycleProfit += profit;
       
-      if(!isTrim) {
+      // Nếu đang bật Hedge thì chốt lãi Toàn Bộ khi hit bất kỳ TP rổ nào (L1+)
+      if(InpHedgeType != HEDGE_NONE) {
+         profit = GetBasketProfit(false) + GetBasketProfit(true);
+         CloseAllPositions();
          g_cycleWins++;
-         PrintFormat("🎯 GỘP TP CHÍNH L%d #%d: %.2f USD | %d pos | Tổng: +%.2f", targetLevel, g_cycleWins, profit, count, g_cycleProfit);
+         g_cycleProfit += profit;
+         PrintFormat("🎯 HEDGE BÁN ĐỨT [%s] L%d: %.2f USD | Tổng: +%.2f", isTrim?"TRIM":"MAIN", targetLevel, profit, g_cycleProfit);
          g_direction=0; g_dcaLevel=0; g_lastDCATime=0; g_lastPyramidTime=0;
+         g_trimActive=false; g_trimDirection=0; g_trimDcaLevel=0; g_lastTrimTime = 0;
       } else {
-         PrintFormat("🎯 GỘP TP TỈA L%d: %.2f USD | %d pos | Tổng: +%.2f", targetLevel, profit, count, g_cycleProfit);
-         g_trimActive=false; g_trimDirection=0; g_trimDcaLevel=0; g_lastTrimTime=0;
+         int count = CountPositions(0, isTrim);
+         CloseBasket(isTrim);
+         g_cycleProfit += profit;
+         
+         if(!isTrim) {
+            g_cycleWins++;
+            PrintFormat("🎯 GỘP TP CHÍNH L%d #%d: %.2f USD | %d pos | Tổng: +%.2f", targetLevel, g_cycleWins, profit, count, g_cycleProfit);
+            g_direction=0; g_dcaLevel=0; g_lastDCATime=0; g_lastPyramidTime=0;
+         } else {
+            PrintFormat("🎯 GỘP TP TỈA L%d: %.2f USD | %d pos | Tổng: +%.2f", targetLevel, profit, count, g_cycleProfit);
+            g_trimActive=false; g_trimDirection=0; g_trimDcaLevel=0; g_lastTrimTime=0;
+         }
       }
    }
 }

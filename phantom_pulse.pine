@@ -1,0 +1,223 @@
+//@version=5
+strategy("Phantom Pulse - Triple Screen", overlay=true, initial_capital=10000, default_qty_type=strategy.percent_of_equity, default_qty_value=10, calc_on_every_tick=true, process_orders_on_close=true)
+
+// ==========================================
+// THIẾT LẬP THÔNG SỐ (INPUTS)
+// ==========================================
+
+// --- Preset / Set Chuyển Nhanh ---
+group_preset = "Trading Style (Preset)"
+preset = input.string("Scalp", options=["Scalp", "Swing", "Day", "Custom"], title="Style Preset", group=group_preset)
+custom_w1 = input.timeframe("1D", title="Custom W1 (If Custom Selected)", group=group_preset)
+custom_w2 = input.timeframe("60", title="Custom W2 (If Custom Selected)", group=group_preset)
+
+tf_w1 = preset == "Scalp" ? "1D" : preset == "Swing" ? "1D" : preset == "Day" ? "1W" : custom_w1
+tf_w2 = preset == "Scalp" ? "60" : preset == "Swing" ? "240" : preset == "Day" ? "4D" : custom_w2
+
+// --- Window 1 (Macro Trend) ---
+group_w1 = "Window 1 (Macro Trend)"
+st_factor = input.float(3.0, title="Supertrend Factor", group=group_w1)
+st_atr_len = input.int(10, title="Supertrend ATR", group=group_w1)
+adx_len = input.int(14, title="ADX Length", group=group_w1)
+adx_threshold = input.int(20, title="ADX Min Threshold (Filter Chop)", group=group_w1)
+
+// --- Window 2 (Momentum) ---
+group_w2 = "Window 2 (Momentum)"
+efi_len = input.int(13, title="Elder Force Index Length", group=group_w2)
+armed_bars = input.int(10, title="Armed Duration (Chart Bars)", group=group_w2, tooltip="Số lượng nến duy trì trạng thái Lên đạn sau khi H1 có EFI đồng thuận (Chuyển Xanh/Đỏ)")
+
+// --- Window 3 (M15) - Execution ---
+group_w3 = "Window 3 (Execution) - Chart TF"
+tenkan_len = input.int(9, title="Tenkan-sen Length", group=group_w3)
+kijun_len = input.int(26, title="Kijun-sen Length", group=group_w3)
+senkou_len = input.int(52, title="Senkou Span B Length", group=group_w3)
+use_kumo = input.bool(true, title="Enable Kumo Cloud Filter", group=group_w3)
+swing_len = input.int(15, title="Swing Stop Loss Length (Bars)", group=group_w3, tooltip="Số lượng nến M15 để dò tìm Đáy Cũ / Đỉnh Cũ làm mốc cắt lỗ.")
+
+// ==========================================
+// LOGIC WINDOW 1 & WINDOW 2 (MULTIPLE TIMEFRAME)
+// ==========================================
+
+// Hàm tính toán cho Window 1 (D1)
+f_w1() =>
+    [supertrend, direction] = ta.supertrend(st_factor, st_atr_len)
+    [diplus, diminus, adx] = ta.dmi(adx_len, adx_len)
+    
+    // Đánh giá 2 trụ cột (Direction & Strength) - Đã bỏ EMA và MACD để bớt khắt khe
+    bull = direction < 0 and adx > adx_threshold
+    bear = direction > 0 and adx > adx_threshold
+    [bull, bear]
+
+// Lấy dữ liệu W1 mà không bị Lookahead bias
+[w1_bull, w1_bear] = request.security(syminfo.tickerid, tf_w1, f_w1(), lookahead=barmerge.lookahead_off)
+
+// Hàm tính toán cho Window 2 (H1) - Elder Force Index (EFI)
+f_w2() =>
+    efi = ta.ema((close - close[1]) * volume, efi_len)
+    bull_pb = efi > 0 // Chuyển xanh
+    bear_pb = efi < 0 // Chuyển đỏ
+    [bull_pb, bear_pb]
+
+[w2_bull_pb, w2_bear_pb] = request.security(syminfo.tickerid, tf_w2, f_w2(), lookahead=barmerge.lookahead_off)
+
+// Theo dõi trạng thái "ARMED" (Đã lên đạn)
+var int bars_since_bull_pb = 9999
+var int bars_since_bear_pb = 9999
+
+if w2_bull_pb
+    bars_since_bull_pb := 0
+else
+    bars_since_bull_pb += 1
+
+if w2_bear_pb
+    bars_since_bear_pb := 0
+else
+    bars_since_bear_pb += 1
+
+is_armed_long = w1_bull and bars_since_bull_pb <= armed_bars
+is_armed_short = w1_bear and bars_since_bear_pb <= armed_bars
+
+
+// ==========================================
+// LOGIC WINDOW 3 (ICHIMOKU EXECUTION)
+// ==========================================
+
+donchian(len) => math.avg(ta.lowest(len), ta.highest(len))
+tenkan = donchian(tenkan_len)
+kijun = donchian(kijun_len)
+senkouA = math.avg(tenkan, kijun)
+senkouB = donchian(senkou_len)
+
+// Đám mây Kumo tại thời điểm hiện tại (Đẩy lùi về sau 26 nến)
+lead1 = senkouA[kijun_len - 1]
+lead2 = senkouB[kijun_len - 1]
+
+// Bộ lọc Mây Kumo (Trên viền dưới của mây đối với Long, dưới viền trên đối với Short)
+price_above_kumo = not use_kumo or close > math.min(lead1, lead2)
+price_below_kumo = not use_kumo or close < math.max(lead1, lead2)
+
+// Tín hiệu bóp cò (Trigger): Giá đóng cửa cắt qua Kijun-sen
+trigger_long = ta.crossover(close, kijun)
+trigger_short = ta.crossunder(close, kijun)
+
+// ==========================================
+// VÀO LỆNH VÀ THOÁT LỆNH
+// ==========================================
+
+enter_long = is_armed_long and trigger_long and price_above_kumo and strategy.position_size <= 0
+enter_short = is_armed_short and trigger_short and price_below_kumo and strategy.position_size >= 0
+
+// Thoát lệnh (Price Action Swing Trailing Stop kết hợp Hard SL)
+swing_low = ta.lowest(low, swing_len)
+swing_high = ta.highest(high, swing_len)
+
+var float trail_stop = na
+var float hard_sl = na
+exit_long = false
+exit_short = false
+
+if enter_long
+    strategy.entry("Long", strategy.long)
+    hard_sl := low[1]
+
+if enter_short
+    strategy.entry("Short", strategy.short)
+    hard_sl := high[1]
+
+if strategy.position_size > 0
+    current_sl = swing_low[1] 
+    trail_stop := math.max(nz(trail_stop, current_sl), current_sl) 
+    
+    // Thoát nếu chạm Trailing Stop hoặc Hard SL
+    if close < trail_stop or close < hard_sl
+        strategy.close("Long", comment=(close < hard_sl and close >= trail_stop) ? "Hard SL" : "Exit Long")
+        exit_long := true
+        trail_stop := na
+        hard_sl := na
+else if strategy.position_size < 0
+    current_sl = swing_high[1] 
+    trail_stop := math.min(nz(trail_stop, current_sl), current_sl) 
+    
+    // Thoát nếu chạm Trailing Stop hoặc Hard SL
+    if close > trail_stop or close > hard_sl
+        strategy.close("Short", comment=(close > hard_sl and close <= trail_stop) ? "Hard SL" : "Exit Short")
+        exit_short := true
+        trail_stop := na
+        hard_sl := na
+else
+    trail_stop := na
+    hard_sl := na
+
+
+// ==========================================
+// HIỂN THỊ ĐỒ THỊ (PLOTTING)
+// ==========================================
+
+// Vẽ Kijun-sen (Đường cản động chính)
+plot(kijun, color=color.new(color.blue, 0), title="Kijun-sen", linewidth=2)
+
+// Vẽ đường Swing Trailing Stop và Hard SL
+plot(strategy.position_size != 0 ? trail_stop : na, color=color.new(color.fuchsia, 0), style=plot.style_stepline, linewidth=2, title="Swing Trailing Stop")
+plot(strategy.position_size != 0 ? hard_sl : na, color=color.new(color.red, 0), style=plot.style_linebr, linewidth=2, title="Hard SL")
+
+// Vẽ Đám mây Kumo (Đẩy tới tương lai 26 nến)
+p1 = plot(senkouA, offset = kijun_len - 1, color=color.new(color.green, 50), title="Senkou A")
+p2 = plot(senkouB, offset = kijun_len - 1, color=color.new(color.red, 50), title="Senkou B")
+fill(p1, p2, color = senkouA > senkouB ? color.new(color.green, 90) : color.new(color.red, 90), title="Kumo Cloud")
+
+// Tô màu nền khi hệ thống "ARMED" (Chờ bóp cò)
+bgcolor(is_armed_long ? color.new(color.green, 95) : is_armed_short ? color.new(color.red, 95) : na, title="Armed Background")
+
+// Hiển thị mũi tên vào lệnh
+plotshape(enter_long, title="Long Entry", location=location.belowbar, color=color.new(color.green, 0), style=shape.triangleup, size=size.small)
+plotshape(enter_short, title="Short Entry", location=location.abovebar, color=color.new(color.red, 0), style=shape.triangledown, size=size.small)
+
+// Hiển thị vòng tròn đóng lệnh
+plotshape(exit_long, title="Exit Long", location=location.abovebar, color=color.new(color.orange, 0), style=shape.circle, size=size.small)
+plotshape(exit_short, title="Exit Short", location=location.belowbar, color=color.new(color.orange, 0), style=shape.circle, size=size.small)
+
+// ==========================================
+// DASHBOARD (BẢNG TRẠNG THÁI & THỐNG KÊ)
+// ==========================================
+var table dash = table.new(position.top_right, 2, 6, bgcolor=color.new(color.black, 80), border_width=1, border_color=color.new(color.gray, 50))
+
+if barstate.islast
+    // Header
+    table.cell(dash, 0, 0, "PHANTOM PULSE", text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 50))
+    table.cell(dash, 1, 0, "STATUS", text_color=color.white, text_size=size.normal, bgcolor=color.new(color.blue, 50))
+    
+    // W1 Status
+    w1_status_text = w1_bull ? "STRONG BULL" : w1_bear ? "STRONG BEAR" : "NEUTRAL"
+    w1_status_color = w1_bull ? color.green : w1_bear ? color.red : color.gray
+    table.cell(dash, 0, 1, "W1 (" + tf_w1 + ") Trend", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 1, w1_status_text, text_color=w1_status_color, text_size=size.small)
+    
+    // W2 Status
+    w2_status_text = is_armed_long ? "ARMED LONG" : is_armed_short ? "ARMED SHORT" : "WAITING"
+    w2_status_color = is_armed_long ? color.green : is_armed_short ? color.red : color.gray
+    table.cell(dash, 0, 2, "W2 (" + tf_w2 + ") Reload", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 2, w2_status_text, text_color=w2_status_color, text_size=size.small)
+    
+    // W3 Status
+    w3_status_text = enter_long ? "LONG EXECUTED" : enter_short ? "SHORT EXECUTED" : trigger_long ? "TRIGGER BUY" : trigger_short ? "TRIGGER SELL" : "WAITING"
+    w3_status_color = (enter_long or trigger_long) ? color.green : (enter_short or trigger_short) ? color.red : color.gray
+    table.cell(dash, 0, 3, "W3 (M15) Trigger", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 3, w3_status_text, text_color=w3_status_color, text_size=size.small)
+    
+    // Statistics Header
+    table.cell(dash, 0, 4, "--- STATS ---", text_color=color.gray, text_size=size.small)
+    table.cell(dash, 1, 4, "-------------", text_color=color.gray, text_size=size.small)
+    
+    // Total Trades & Winrate
+    total_trades = strategy.closedtrades
+    win_trades = 0
+    if total_trades > 0
+        for i = 0 to total_trades - 1
+            if strategy.closedtrades.profit(i) > 0
+                win_trades += 1
+                
+    winrate = total_trades > 0 ? (win_trades / total_trades) * 100 : 0
+    stats_text = str.tostring(total_trades) + " Trades | " + str.tostring(winrate, "#.##") + "% WR"
+    
+    table.cell(dash, 0, 5, "Performance", text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 5, stats_text, text_color=color.yellow, text_size=size.small)
